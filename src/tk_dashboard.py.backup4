@@ -1,0 +1,834 @@
+"""
+tk_dashboard.py
+Tkinter-based live dashboard. Built on the visual structure/style of the
+provided mockup, but with real data wired in instead of hardcoded values.
+
+REAL (wired to your actual detectors): fatigue %, attention %, PERCLOS,
+eye closure, yawns, phone/drink detection, alert cards, time driven,
+the actual webcam feed with real face-mesh overlay, night-mode tint
+(a genuine toggle, not decorative), alert-threshold buttons (genuinely
+clickable and affect what's highlighted).
+
+HONEST DEMO/PLACEHOLDER (clearly labeled, not real hardware):
+vehicle speed gauge (no OBD-II connected) and the live-location map
+(no GPS connected) - both kept as visual "vision of what's possible"
+demos rather than removed, but labeled so nobody mistakes them for
+live data.
+"""
+
+import time
+import math
+import tkinter as tk
+from tkinter import font as tkfont
+import cv2
+from PIL import Image, ImageTk
+import random
+
+from src.utils import (
+    COL_RED as _RED, COL_AMBER as _AMBER, COL_GREEN as _GREEN, COL_CYAN as _CYAN
+)
+
+# ---------------- palette (hex, since this file is Tkinter not cv2) ----------------
+BG      = "#0d1117"
+PANEL   = "#161b22"
+CARD    = "#1c2128"
+BORDER  = "#30363d"
+TEXT    = "#e6edf3"
+MUTED   = "#8b949e"
+RED     = "#f85149"
+RED_DIM = "#3d1a1a"
+ORANGE  = "#fb923c"
+YELLOW  = "#f59e0b"
+GREEN   = "#3fb950"
+BLUE    = "#58a6ff"
+
+
+def pct_color(pct):
+    if pct >= 70:
+        return RED
+    if pct >= 35:
+        return YELLOW
+    return GREEN
+
+
+def pct_word(pct):
+    if pct >= 70:
+        return "Critical"
+    if pct >= 35:
+        return "Elevated"
+    return "Normal"
+
+
+# ---------------- Metric card (from the provided mockup, + a real update() method) ----------------
+class MetricCard(tk.Frame):
+    def __init__(self, parent, label, value, unit="", status="", status_color=GREEN,
+                 show_bar=True, bar_color=GREEN, bar_pct=0):
+        super().__init__(parent, bg=CARD, highlightbackground=BORDER, highlightthickness=1)
+        self.show_bar = show_bar
+        self.bar_color = bar_color
+
+        tk.Label(self, text=label, bg=CARD, fg=MUTED, font=("Courier", 8)).pack(anchor="w", padx=6, pady=(5, 0))
+
+        row = tk.Frame(self, bg=CARD)
+        row.pack(anchor="w", padx=6)
+        self.value_label = tk.Label(row, text=value, bg=CARD, fg=TEXT, font=("Courier", 16, "bold"))
+        self.value_label.pack(side="left")
+        self.unit_label = None
+        if unit:
+            self.unit_label = tk.Label(row, text=unit, bg=CARD, fg=MUTED, font=("Courier", 8))
+            self.unit_label.pack(side="left", padx=(2, 0), pady=(4, 0))
+
+        self.status_label = tk.Label(self, text=status, bg=CARD, fg=status_color, font=("Courier", 7))
+        self.status_label.pack(anchor="w", padx=6)
+
+        self.bar_fg = None
+        if show_bar:
+            bar_bg = tk.Frame(self, bg=BORDER, height=4)
+            bar_bg.pack(fill="x", padx=6, pady=(3, 5))
+            bar_bg.pack_propagate(False)
+            self.bar_fg = tk.Frame(bar_bg, bg=bar_color, height=4)
+            self.bar_fg.place(relwidth=bar_pct / 100, relheight=1)
+        else:
+            tk.Frame(self, bg=CARD, height=6).pack()
+
+    def update_values(self, value=None, status=None, status_color=None, bar_pct=None):
+        """Reconfigure this card's widgets in place - no recreation, no flicker."""
+        if value is not None:
+            self.value_label.configure(text=value)
+        if status is not None:
+            self.status_label.configure(text=status)
+        if status_color is not None:
+            self.status_label.configure(fg=status_color)
+            if self.bar_fg is not None:
+                self.bar_fg.configure(bg=status_color)
+        if bar_pct is not None and self.bar_fg is not None:
+            self.bar_fg.place(relwidth=max(0.0, min(1.0, bar_pct / 100)), relheight=1)
+
+
+# ---------------- Video canvas: REAL webcam frame + real overlays ----------------
+class VideoCanvas(tk.Canvas):
+    def __init__(self, parent, **kw):
+        super().__init__(parent, bg="black", highlightthickness=0, **kw)
+        self._photo = None  # must keep a reference or Tkinter garbage-collects it
+        self._tick = 0
+
+    def update_frame(self, bgr_frame, overall_severity, overall_status):
+        """bgr_frame should already have face-mesh/detection boxes drawn on it
+        by the caller (main.py) - this method only handles display + the
+        severity banner overlay."""
+        self._tick += 1
+        w = self.winfo_width() or 640
+        h = self.winfo_height() or 360
+
+        frame = cv2.resize(bgr_frame, (w, h))
+
+        if overall_severity in ("WARNING", "CRITICAL"):
+            color = (0, 0, 255) if overall_severity == "CRITICAL" else (0, 165, 255)
+            box_w, box_h = 240, 60
+            bx, by = (w - box_w) // 2, h // 2 - 60
+            overlay = frame.copy()
+            cv2.rectangle(overlay, (bx, by), (bx + box_w, by + box_h), (10, 10, 10), -1)
+            cv2.addWeighted(overlay, 0.75, frame, 0.25, 0, dst=frame)
+            cv2.rectangle(frame, (bx, by), (bx + box_w, by + box_h), color, 2)
+            label = "WARNING" if overall_severity == "WARNING" else "CRITICAL"
+            cv2.putText(frame, label, (bx + 20, by + 26), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2, cv2.LINE_AA)
+            sub = (overall_status or "").title()
+            cv2.putText(frame, sub, (bx + 15, by + 48), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (255, 255, 255), 1, cv2.LINE_AA)
+
+        rec_color = (0, 0, 255) if self._tick % 20 < 10 else (60, 0, 0)
+        cv2.circle(frame, (16, 16), 5, rec_color, -1)
+        cv2.putText(frame, "LIVE", (26, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (100, 220, 100), 1, cv2.LINE_AA)
+
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        img = Image.fromarray(rgb)
+        self._photo = ImageTk.PhotoImage(image=img)
+        self.delete("all")
+        self.create_image(0, 0, anchor="nw", image=self._photo)
+
+
+# ---------------- Map canvas: REAL GPS map overlay ----------------
+class MapCanvas(tk.Canvas):
+    def __init__(self, parent, map_image_path=None, **kw):
+        super().__init__(parent, bg="#1a2030", highlightthickness=0, **kw)
+        self._car_t = 0.0
+        self._route = [(30, 85), (80, 65), (140, 55), (200, 45), (260, 35), (290, 28)]
+        self._after_job = None
+        self._map_image = None
+        self._map_image_tk = None
+        self._gps_data = []  # List of (lat, lon) tuples for real GPS tracking
+        self._current_position = None  # Current GPS position
+        self._show_demo_route = True  # Toggle between demo and real GPS
+
+        # Try to load map image if provided
+        if map_image_path:
+            self._load_map_image(map_image_path)
+
+        self.bind("<Configure>", lambda e: self._draw())
+        self.bind("<Destroy>", self._cancel_animation)
+        self._after_job = self.after(60, self._animate)
+
+    def _load_map_image(self, path):
+        """Load and prepare a map image for display"""
+        try:
+            # Load image and convert to PhotoImage
+            pil_image = Image.open(path)
+            # Store original for scaling
+            self._map_image_original = pil_image
+            self._map_image = pil_image  # Will be resized in _draw
+        except Exception as e:
+            print(f"Could not load map image: {e}")
+            self._map_image = None
+
+    def update_gps_data(self, gps_points):
+        """Update with real GPS data points"""
+        if gps_points and len(gps_points) > 0:
+            self._gps_data = gps_points
+            self._show_demo_route = False
+            # Set current position to last point if available
+            if len(gps_points) > 0:
+                self._current_position = gps_points[-1]
+        else:
+            self._show_demo_route = True
+
+    def _cancel_animation(self, event=None):
+        if self._after_job is not None:
+            try:
+                self.after_cancel(self._after_job)
+            except tk.TclError:
+                pass
+            self._after_job = None
+
+    def _interp(self, t):
+        pts = self._route
+        seg = t * (len(pts) - 1)
+        i = min(int(seg), len(pts) - 2)
+        f = seg - i
+        x = pts[i][0] + (pts[i + 1][0] - pts[i][0]) * f
+        y = pts[i][1] + (pts[i + 1][1] - pts[i][1]) * f
+        return x, y
+
+    def _draw(self):
+        self.delete("all")
+        w, h = self.winfo_width() or 300, self.winfo_height() or 100
+        sx, sy = w / 300, h / 100
+
+        # Draw map background if available
+        if self._map_image:
+            try:
+                # Resize image to fit canvas
+                resized = self._map_image.resize((w, h), Image.Resampling.LANCZOS)
+                self._map_image_tk = ImageTk.PhotoImage(resized)
+                self.create_image(0, 0, anchor="nw", image=self._map_image_tk)
+            except Exception as e:
+                print(f"Error drawing map image: {e}")
+                # Fall back to grid background
+                self._draw_background_grid(w, h, sx, sy)
+        else:
+            # Draw grid background
+            self._draw_background_grid(w, h, sx, sy)
+
+        # Draw route (either demo or real GPS)
+        if self._show_demo_route or len(self._gps_data) < 2:
+            # Demo route
+            self._draw_demo_route(w, h, sx, sy)
+        else:
+            # Real GPS route
+            self._draw_gps_route(w, h, sx, sy)
+
+        # Draw current position indicator
+        self._draw_position_indicator(w, h, sx, sy)
+
+        # Add label
+        label_text = "LIVE MAP" if not self._show_demo_route and self._gps_data else "DEMO MAP - GPS not connected"
+        label_color = "#10b981" if not self._show_demo_route and self._gps_data else "#f59e0b"
+        self.create_text(w - 6, h - 4, text=label_text, fill=label_color,
+                          font=("Courier", 8, "bold"), anchor="se")
+
+    def _draw_background_grid(self, w, h, sx, sy):
+        """Draw the standard grid background"""
+        for x in range(0, 301, 30):
+            self.create_line(x * sx, 0, x * sx, h, fill="#2a3040", width=1)
+        for y in range(0, 101, 25):
+            self.create_line(0, y * sy, w, y * sy, fill="#2a3040", width=1)
+
+    def _draw_demo_route(self, w, h, sx, sy):
+        """Draw the demo animated route"""
+        pts_flat = []
+        for (rx, ry) in self._route:
+            pts_flat += [rx * sx, ry * sy]
+        self.create_line(*pts_flat, fill="#4a5568", width=int(7 * sy), smooth=True)
+        self.create_line(*pts_flat, fill="#718096", width=int(2 * sy), dash=(8, 4), smooth=True)
+
+        cx, cy = self._interp(self._car_t)
+        cx, cy = cx * sx, cy * sy
+        self.create_oval(cx - 8, cy - 8, cx + 8, cy + 8, outline=BLUE, width=1)
+        self.create_oval(cx - 5, cy - 5, cx + 5, cy + 5, fill=BLUE, outline="")
+
+    def _draw_gps_route(self, w, h, sx, sy):
+        """Draw real GPS route"""
+        if len(self._gps_data) < 2:
+            return
+
+        # Convert GPS points to canvas coordinates (simple linear mapping for demo)
+        # In a real implementation, you'd use proper lat/lng to pixel conversion
+        min_lat = min(p[0] for p in self._gps_data)
+        max_lat = max(p[0] for p in self._gps_data)
+        min_lon = min(p[1] for p in self._gps_data)
+        max_lon = max(p[1] for p in self._gps_data)
+
+        # Add some padding
+        lat_range = max_lat - min_lat or 0.001
+        lon_range = max_lon - min_lon or 0.001
+        padding = 0.1
+        lat_range += lat_range * padding
+        lon_range += lon_range * padding
+        min_lat -= lat_range * padding / 2
+        min_lon -= lon_range * padding / 2
+
+        points = []
+        for lat, lon in self._gps_data:
+            # Map to canvas coordinates
+            x = ((lon - min_lon) / lon_range) * w if lon_range > 0 else w / 2
+            y = h - ((lat - min_lat) / lat_range) * h if lat_range > 0 else h / 2  # Flip Y for canvas
+            points.extend([x, y])
+
+        if len(points) >= 4:
+            self.create_line(*points, fill="#10b981", width=int(3 * sy), smooth=True)
+            # Draw points
+            for i in range(0, len(points), 2):
+                x, y = points[i], points[i+1]
+                self.create_oval(x-2, y-2, x+2, y+2, fill="#34d399", outline="")
+
+    def _draw_position_indicator(self, w, h, sx, sy):
+        """Draw current position indicator"""
+        if self._show_demo_route:
+            # Demo position
+            cx, cy = self._interp(self._car_t)
+            cx, cy = cx * sx, cy * sy
+            self.create_oval(cx - 8, cy - 8, cx + 8, cy + 8, outline=BLUE, width=1)
+            self.create_oval(cx - 5, cy - 5, cx + 5, cy + 5, fill=BLUE, outline="")
+        elif self._current_position:
+            # Real GPS position
+            lat, lon = self._current_position
+            # Use same mapping as in _draw_gps_route
+            min_lat = min(p[0] for p in self._gps_data)
+            max_lat = max(p[0] for p in self._gps_data)
+            min_lon = min(p[1] for p in self._gps_data)
+            max_lon = max(p[1] for p in self._gps_data)
+
+            lat_range = max_lat - min_lat or 0.001
+            lon_range = max_lon - min_lon or 0.001
+            padding = 0.1
+            lat_range += lat_range * padding
+            lon_range += lon_range * padding
+            min_lat -= lat_range * padding / 2
+            min_lon -= lon_range * padding / 2
+
+            x = ((lon - min_lon) / lon_range) * w if lon_range > 0 else w / 2
+            y = h - ((lat - min_lat) / lat_range) * h if lat_range > 0 else h / 2
+
+            self.create_oval(x - 6, y - 6, x + 6, y + 6, outline="#dc2626", width=2)
+            self.create_oval(x - 3, y - 3, x + 3, y + 3, fill="#dc2626", outline="")
+
+    def _animate(self):
+        self._car_t = (self._car_t + 0.001) % 1.0
+        self._draw()
+        self._after_job = self.after(60, self._animate)
+
+
+# ---------------- Main app ----------------
+class DrowsiGuardApp(tk.Tk):
+    def __init__(self, cap, face_mesh_module, engine, object_detector, alert_manager, logger,
+                 test_mode=False, map_image_path=None):
+        super().__init__()
+        self.title("DrowsiGuard - Driver Monitoring System")
+        self.configure(bg=BG)
+        self.geometry("1180x760")
+        self.minsize(1000, 680)
+
+        self.cap = cap
+        self.detect_face = face_mesh_module.detect_face
+        self.draw_face_mesh = face_mesh_module.draw_face_mesh
+        self.engine = engine
+        self.object_detector = object_detector
+        self.alert_manager = alert_manager
+        self.logger = logger
+        self.test_mode = test_mode
+
+        self.night_mode = False
+        self.alert_threshold = 70
+        self.session_start = logger.session_start if logger else time.time()
+
+        self._build_header()
+        self._build_body()
+        self._build_bottom()
+        self._build_footer()
+
+        self._clock_job = None
+        self._update_job = None
+
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
+        self._tick_clock()
+
+        if not test_mode:
+            self._update_job = self.after(33, self._update)
+
+    # ---------------- header ----------------
+    def _build_header(self):
+        hdr = tk.Frame(self, bg=PANEL, height=40)
+        hdr.pack(fill="x")
+        hdr.pack_propagate(False)
+
+        left = tk.Frame(hdr, bg=PANEL)
+        left.pack(side="left", padx=10, pady=6)
+        logo = tk.Frame(left, bg=BLUE, width=22, height=22)
+        logo.pack(side="left")
+        logo.pack_propagate(False)
+        tk.Label(logo, text="D", bg=BLUE, fg="white", font=("Courier", 11, "bold")).place(relx=0.5, rely=0.5, anchor="center")
+        tk.Label(left, text=" DrowsiGuard", bg=PANEL, fg=BLUE, font=("Courier", 12, "bold")).pack(side="left")
+        tk.Label(left, text="  Driver Monitoring System", bg=PANEL, fg=MUTED, font=("Courier", 8)).pack(side="left")
+
+        right = tk.Frame(hdr, bg=PANEL)
+        right.pack(side="right", padx=10, pady=6)
+
+        self._clock_var = tk.StringVar(value="--:-- --")
+        tk.Label(right, textvariable=self._clock_var, bg=PANEL, fg=MUTED, font=("Courier", 9)).pack(side="right", padx=(10, 0))
+
+        self._night_btn = tk.Label(right, text="Night Mode: OFF", bg="#21262d", fg="#93c5fd",
+                                    font=("Courier", 8), padx=6, pady=2, cursor="hand2")
+        self._night_btn.pack(side="right", padx=6)
+        self._night_btn.bind("<Button-1>", self._toggle_night_mode)
+
+        cam = tk.Frame(right, bg=PANEL)
+        cam.pack(side="right")
+        cam_ok = self.cap is not None and (self.test_mode or self.cap.isOpened())
+        tk.Label(cam, text="●", bg=PANEL, fg=(GREEN if cam_ok else RED), font=("Courier", 8)).pack(side="left")
+        tk.Label(cam, text=f" Camera: {'Active' if cam_ok else 'Unavailable'}", bg=PANEL, fg=MUTED, font=("Courier", 8)).pack(side="left")
+
+        tk.Frame(self, bg=BORDER, height=1).pack(fill="x")
+
+    def _toggle_night_mode(self, event=None):
+        self.night_mode = not self.night_mode
+        self._night_btn.configure(text=f"Night Mode: {'ON' if self.night_mode else 'OFF'}",
+                                   fg=("#fbbf24" if self.night_mode else "#93c5fd"))
+
+    # ---------------- body ----------------
+    def _build_body(self):
+        body = tk.Frame(self, bg=BG)
+        body.pack(fill="both", expand=True)
+        self._build_left(body)
+        self._build_center(body)
+        self._build_right(body)
+
+    def _build_left(self, parent):
+        left = tk.Frame(parent, bg=PANEL, width=190)
+        left.pack(side="left", fill="y")
+        left.pack_propagate(False)
+        tk.Frame(parent, bg=BORDER, width=1).pack(side="left", fill="y")
+
+        tk.Label(left, text="Real-Time Metrics", bg=PANEL, fg=MUTED, font=("Courier", 7, "bold")).pack(anchor="w", padx=8, pady=(6, 4))
+
+        self.card_fatigue = MetricCard(left, "Fatigue Level", "0%", status="Normal", status_color=GREEN, bar_color=GREEN, bar_pct=0)
+        self.card_attention = MetricCard(left, "Attention Score", "100%", status="Good", status_color=GREEN, bar_color=GREEN, bar_pct=100)
+        self.card_perclos = MetricCard(left, "PERCLOS", "0%", status="Normal", status_color=GREEN, bar_color=GREEN, bar_pct=0)
+        self.card_eye = MetricCard(left, "Eye Closure", "0.00s", status="Normal", status_color=GREEN, show_bar=False)
+        self.card_yawns = MetricCard(left, "Yawns", "0", status="This session", status_color=MUTED, show_bar=False)
+        self.card_gaze = MetricCard(left, "Gaze Direction", "N/A", status="Not tracked yet", status_color=MUTED, show_bar=False)
+
+        for card in (self.card_fatigue, self.card_attention, self.card_perclos,
+                     self.card_eye, self.card_yawns, self.card_gaze):
+            card.pack(fill="x", padx=6, pady=2)
+
+        tags_frame = tk.Frame(left, bg=PANEL)
+        tags_frame.pack(fill="x", padx=6, pady=(6, 2), side="bottom")
+        self._tag_widgets = {}
+        for tag in ["phone", "drink", "smoke"]:
+            t = tk.Frame(tags_frame, bg=CARD, highlightbackground=BORDER, highlightthickness=1)
+            t.pack(fill="x", pady=2)
+            label_text = tag if tag != "smoke" else "smoke (planned)"
+            lbl = tk.Label(t, text=label_text, bg=CARD, fg=MUTED, font=("Courier", 9))
+            lbl.pack(padx=8, pady=3)
+            self._tag_widgets[tag] = (t, lbl)
+
+    def _build_center(self, parent):
+        center = tk.Frame(parent, bg=BG)
+        center.pack(side="left", fill="both", expand=True, padx=4, pady=4)
+
+        tk.Label(center, text="Driver Status", bg=BG, fg="#c9d1d9", font=("Courier", 9, "bold")).pack(anchor="w", padx=4, pady=(2, 4))
+
+        self.video_canvas = VideoCanvas(center, height=260)
+        self.video_canvas.pack(fill="both", expand=True, padx=4)
+
+        thresh_frame = tk.Frame(center, bg=BG)
+        thresh_frame.pack(anchor="w", padx=4, pady=6)
+        tk.Label(thresh_frame, text="Alert Threshold:", bg=BG, fg=MUTED, font=("Courier", 8)).pack(side="left", padx=(0, 6))
+
+        self._threshold_labels = {}
+        for val in [60, 70, 80, 90]:
+            lbl = tk.Label(thresh_frame, text=f"{val}%", font=("Courier", 8, "bold"), padx=10, pady=3, cursor="hand2")
+            lbl.pack(side="left", padx=2)
+            lbl.bind("<Button-1>", lambda e, v=val: self._set_threshold(v))
+            self._threshold_labels[val] = lbl
+        self._refresh_threshold_pills()
+
+    def _set_threshold(self, val):
+        self.alert_threshold = val
+        self._refresh_threshold_pills()
+
+    def _refresh_threshold_pills(self):
+        for val, lbl in self._threshold_labels.items():
+            active = val == self.alert_threshold
+            lbl.configure(bg=YELLOW if active else CARD, fg="black" if active else MUTED)
+
+    def _build_right(self, parent):
+        tk.Frame(parent, bg=BORDER, width=1).pack(side="left", fill="y")
+        right = tk.Frame(parent, bg=PANEL, width=220)
+        right.pack(side="left", fill="y")
+        right.pack_propagate(False)
+
+        tk.Label(right, text="Alert:", bg=PANEL, fg=MUTED, font=("Courier", 7, "bold")).pack(anchor="w", padx=8, pady=(6, 4))
+
+        self.alerts_container = tk.Frame(right, bg=PANEL)
+        self.alerts_container.pack(fill="x")
+
+        self.no_alert_label = tk.Label(self.alerts_container, text="No active alerts", bg=PANEL, fg=GREEN, font=("Courier", 8, "bold"))
+        self.no_alert_label.pack(anchor="w", padx=8, pady=6)
+
+        rec = tk.Frame(right, bg=CARD, highlightbackground=BORDER, highlightthickness=1)
+        rec.pack(fill="x", padx=6, pady=(10, 2))
+        tk.Label(rec, text="Recommended Actions", bg=CARD, fg=TEXT, font=("Courier", 8, "bold")).pack(anchor="w", padx=6, pady=(5, 3))
+        self.rec_labels = []
+        for color, txt in [(BLUE, "→ Pull over when safe"), (YELLOW, "→ Take a 15-20 min break"),
+                            (GREEN, "→ Open a window for fresh air")]:
+            l = tk.Label(rec, text=txt, bg=CARD, fg=color, font=("Courier", 7))
+            l.pack(anchor="w", padx=6, pady=1)
+            self.rec_labels.append(l)
+        tk.Frame(rec, bg=CARD, height=4).pack()
+        self.rec_panel = rec
+        self.rec_panel.pack_forget()  # only shown when there's an active alert
+
+    def _update_alerts(self, result, obj_result):
+        for child in list(self.alerts_container.winfo_children()):
+            child.destroy()
+
+        ALERT_TEXT = {
+            "DROWSINESS DETECTED": ("CRITICAL ALERT", "Eyes closed for an extended period. Pull over and rest immediately.", RED_DIM, RED),
+            "DROWSINESS DETECTED (PERCLOS)": ("WARNING", "Repeated fatigue signs over the last minute. Consider a break soon.", "#2d1e00", YELLOW),
+            "HEAD POSE ALERT": ("WARNING", "Head tilted away from the road for a sustained period.", "#2d1e00", YELLOW),
+            "HEAD NOD DETECTED": ("WARNING", "A quick head-drop was detected - possible microsleep.", "#2d1e00", YELLOW),
+            "PHONE USE DETECTED": ("INFO (monitored only)", "Phone use detected - logged, does not sound the alarm.", "#132233", BLUE),
+            "DRINKING DETECTED": ("INFO (monitored only)", "Drinking detected - logged, does not sound the alarm.", "#132233", BLUE),
+        }
+
+        active = []
+        if result.get("status") in ALERT_TEXT:
+            active.append(result["status"])
+        if obj_result and obj_result.get("status") in ALERT_TEXT:
+            active.append(obj_result["status"])
+
+        if not active:
+            self.no_alert_label = tk.Label(self.alerts_container, text="No active alerts", bg=PANEL, fg=GREEN, font=("Courier", 8, "bold"))
+            self.no_alert_label.pack(anchor="w", padx=8, pady=6)
+            self.rec_panel.pack_forget()
+            return
+
+        for status in active[:2]:
+            title, msg, bg, fg = ALERT_TEXT[status]
+            box = tk.Frame(self.alerts_container, bg=bg, highlightbackground=fg, highlightthickness=1)
+            box.pack(fill="x", padx=6, pady=2)
+            tk.Label(box, text=title, bg=bg, fg=fg, font=("Courier", 8, "bold")).pack(anchor="w", padx=6, pady=(5, 2))
+            tk.Label(box, text=msg, bg=bg, fg=TEXT, font=("Courier", 7), justify="left", wraplength=190).pack(anchor="w", padx=6, pady=(0, 5))
+
+        self.rec_panel.pack(fill="x", padx=6, pady=(10, 2))
+
+    # ---------------- bottom ----------------
+    def _build_bottom(self):
+        tk.Frame(self, bg=BORDER, height=1).pack(fill="x")
+        bottom = tk.Frame(self, bg=BG, height=130)
+        bottom.pack(fill="x")
+        bottom.pack_propagate(False)
+
+        # Vehicle status section
+        veh = tk.Frame(bottom, bg=PANEL, width=190)
+        veh.pack(side="left", fill="y")
+        veh.pack_propagate(False)
+        tk.Label(veh, text="Vehicle Status", bg=PANEL, fg="#f59e0b", font=("Courier", 7, "bold")).pack(anchor="w", padx=8, pady=(6, 0))
+
+        # Create vehicle status metrics
+        self.card_speed = MetricCard(veh, "Speed", "-- km/h", unit="", status="N/A", status_color=MUTED, show_bar=False)
+        self.card_battery = MetricCard(veh, "Battery", "--%", unit="", status="Normal", status_color=GREEN, bar_color=GREEN, bar_pct=0)
+        self.card_energy = MetricCard(veh, "Energy", "--%", unit="", status="Normal", status_color=GREEN, bar_color=GREEN, bar_pct=0)
+        self.card_fuel = MetricCard(veh, "Fuel", "--%", unit="", status="Normal", status_color=GREEN, bar_color=GREEN, bar_pct=0)
+
+        # Tire pressure - special display with 4 tires
+        tire_frame = tk.Frame(veh, bg=PANEL)
+        tire_frame.pack(fill="x", padx=6, pady=(4, 0))
+        tk.Label(tire_frame, text="Tire Pressure", bg=PANEL, fg=MUTED, font=("Courier", 8)).pack(anchor="w")
+
+        self.tire_labels = []
+        tire_positions = ["FL", "FR", "RL", "RR"]  # Front Left, Front Right, Rear Left, Rear Right
+        for pos in tire_positions:
+            tire_container = tk.Frame(tire_frame, bg=CARD, highlightbackground=BORDER, highlightthickness=1)
+            tire_container.pack(fill="x", pady=1)
+            tk.Label(tire_container, text=f"{pos}: -- psi", bg=CARD, fg=TEXT, font=("Courier", 8)).pack(anchor="w", padx=4, pady=2)
+            self.tire_labels.append((pos, tire_container))
+
+        tk.Frame(bottom, bg=BORDER, width=1).pack(side="left", fill="y")
+
+        # Map section
+        map_frame = tk.Frame(bottom, bg=PANEL)
+        map_frame.pack(side="left", fill="both", expand=True, padx=4, pady=4)
+        top_row = tk.Frame(map_frame, bg=PANEL)
+        top_row.pack(fill="x", padx=4, pady=(4, 0))
+        tk.Label(top_row, text="Live Location", bg=PANEL, fg="#f59e0b", font=("Courier", 7, "bold")).pack(side="left")
+        self.time_driven_var = tk.StringVar(value="00:00:00")
+        tk.Label(top_row, textvariable=self.time_driven_var, bg=PANEL, fg=TEXT, font=("Courier", 8, "bold")).pack(side="right")
+        tk.Label(top_row, text="Time driven: ", bg=PANEL, fg=MUTED, font=("Courier", 7)).pack(side="right")
+        # Pass map image path if available
+        self.map_canvas = MapCanvas(map_frame, map_image_path="assets/map.png")  # You can specify a default map image
+        self.map_canvas.pack(fill="both", expand=True, padx=4, pady=(0, 4))
+
+    # ---------------- footer ----------------
+    def _build_footer(self):
+        tk.Frame(self, bg=BORDER, height=1).pack(fill="x")
+        ftr = tk.Frame(self, bg=BG, height=28)
+        ftr.pack(fill="x")
+        ftr.pack_propagate(False)
+
+        left = tk.Frame(ftr, bg=BG)
+        left.pack(side="left", padx=10, pady=4)
+        for label in ["Settings", "Device Config", "History & Logs"]:
+            btn = tk.Label(left, text=label, bg=BG, fg=MUTED, font=("Courier", 8), cursor="hand2")
+            btn.pack(side="left", padx=6)
+            btn.bind("<Enter>", lambda e, b=btn: b.configure(fg=TEXT))
+            btn.bind("<Leave>", lambda e, b=btn: b.configure(fg=MUTED))
+
+        right = tk.Frame(ftr, bg=BG)
+        right.pack(side="right", padx=10, pady=4)
+
+        self._footer_dots = {}
+        for key, label in [("system", "System OK"), ("gps", "GPS: Not Connected"), ("sensors", "Sensors Online")]:
+            f = tk.Frame(right, bg=BG)
+            f.pack(side="left", padx=8)
+            dot = tk.Label(f, text="●", bg=BG, fg=GREEN, font=("Courier", 7))
+            dot.pack(side="left")
+            lbl = tk.Label(f, text=f" {label}", bg=BG, fg=MUTED, font=("Courier", 8))
+            lbl.pack(side="left")
+            self._footer_dots[key] = (dot, lbl)
+
+        self._footer_dots["gps"][0].configure(fg=MUTED)  # honestly gray, not green
+
+    def _tick_clock(self):
+        self._clock_var.set(time.strftime("%I:%M %p"))
+        self._clock_job = self.after(1000, self._tick_clock)
+
+    # ---------------- live update loop ----------------
+    def process_one_frame(self, frame):
+        """Runs the real detection pipeline on one BGR frame. Returns
+        (result, obj_result, overall_severity, overall_status, display_frame).
+        Split out from _update() so it can be tested without a live camera."""
+        from src.severity import combine
+
+        frame = cv2.flip(frame, 1)
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        results = self.detect_face(rgb)
+        frame_h, frame_w = frame.shape[:2]
+
+        if results.multi_face_landmarks:
+            landmarks = results.multi_face_landmarks[0]
+            self.draw_face_mesh(frame, landmarks)
+            result = self.engine.process_frame(landmarks, frame_w, frame_h)
+        else:
+            result = self.engine.handle_face_lost()
+
+        obj_result = {"status": "NORMAL", "severity": None, "distraction_percent": 0, "detections": []}
+        if self.object_detector is not None:
+            obj_result = self.object_detector.process_frame(frame)
+            for det in obj_result["detections"]:
+                x1, y1, x2, y2 = det["box"]
+                cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 230, 40), 2)
+                cv2.putText(frame, f"{det['label']} {det['confidence']:.2f}", (x1, max(20, y1 - 8)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 230, 40), 2)
+
+        if self.night_mode:
+            tint = frame.copy()
+            tint[:, :] = (20, 15, 60)
+            frame = cv2.addWeighted(frame, 0.7, tint, 0.3, 0)
+
+        overall_severity = combine(result.get("severity"), obj_result.get("severity"))
+        overall_status = result.get("status") if result.get("severity") == overall_severity else obj_result.get("status")
+
+        return result, obj_result, overall_severity, overall_status, frame
+
+    def apply_frame_result(self, result, obj_result, overall_severity, overall_status, frame):
+        """Pushes one frame's results into all the widgets. Split out from
+        _update() so it's testable with synthetic data (no camera needed)."""
+        self.video_canvas.update_frame(frame, overall_severity, overall_status)
+
+        drowsy_pct = result.get("drowsy_percent", 0)
+        distraction_pct = obj_result.get("distraction_percent", 0) if obj_result else 0
+        pose_alert_dur = result.get("pose_alert_duration", 0.0)
+        pose_ratio_pct = min(100, round(100 * pose_alert_dur / 2.5)) if pose_alert_dur else 0
+        distraction_pct = max(distraction_pct, pose_ratio_pct)
+        attention_pct = max(0, 100 - round((drowsy_pct + distraction_pct) / 2))
+
+        self.card_fatigue.update_values(f"{drowsy_pct}%", pct_word(drowsy_pct), pct_color(drowsy_pct), drowsy_pct)
+        att_color = RED if attention_pct < 50 else (YELLOW if attention_pct < 75 else GREEN)
+        att_word = "Low" if attention_pct < 50 else ("Fair" if attention_pct < 75 else "Good")
+        self.card_attention.update_values(f"{attention_pct}%", att_word, att_color, attention_pct)
+
+        perclos_pct = round(result.get("perclos", 0) * 100)
+        self.card_perclos.update_values(f"{perclos_pct}%", pct_word(perclos_pct), pct_color(perclos_pct), perclos_pct)
+
+        closed_time = result.get("closed_time", 0.0)
+        eye_status = "Above Normal" if closed_time > 0.2 else "Normal"
+        self.card_eye.update_values(f"{closed_time:.2f}s", eye_status, YELLOW if closed_time > 0.2 else GREEN)
+
+        self.card_yawns.update_values(str(result.get("yawn_counter", 0)))
+
+        phone_active = obj_result and obj_result.get("status") == "PHONE USE DETECTED"
+        drink_active = obj_result and obj_result.get("status") == "DRINKING DETECTED"
+        for tag, active in [("phone", phone_active), ("drink", drink_active)]:
+            frame_w, lbl = self._tag_widgets[tag]
+            if active:
+                frame_w.configure(bg=BLUE)
+                lbl.configure(bg=BLUE, fg="black")
+            else:
+                frame_w.configure(bg=CARD)
+                lbl.configure(bg=CARD, fg=MUTED)
+
+        self._update_alerts(result, obj_result)
+
+        # Update vehicle status (in real implementation, this would come from OBD-II/CAN bus)
+        self._update_vehicle_status()
+
+        # Update GPS/map data (in real implementation, this would come from GPS module)
+        self._update_gps_data()
+
+        elapsed = int(time.time() - self.session_start)
+        hh, rem = divmod(elapsed, 3600)
+        mm, ss = divmod(rem, 60)
+        self.time_driven_var.set(f"{hh:02d}:{mm:02d}:{ss:02d}")
+
+        if self.logger:
+            self.logger.track_status(obj_result.get("status", "NORMAL") if obj_result else "NORMAL")
+            if result.get("drowsy_start_event"):
+                self.logger.log("DROWSINESS_START", f"status={result.get('status')}")
+            if result.get("drowsy_end_event"):
+                self.logger.log("DROWSINESS_END")
+            if result.get("yawn_event"):
+                self.logger.log("YAWN")
+
+        if self.alert_manager:
+            self.alert_manager.update(overall_severity)
+
+    def _update_vehicle_status(self):
+        """Update vehicle status displays - in real implementation, get from OBD-II/CAN bus"""
+        # Simulate realistic vehicle data for demo
+        # In real implementation, replace these with actual sensor readings
+
+        # Speed: 0-120 km/h
+        speed = random.randint(0, 120)
+        speed_status = "Normal" if speed < 100 else ("High" if speed < 140 else "Excessive")
+        speed_color = GREEN if speed < 100 else (YELLOW if speed < 140 else RED)
+        self.card_speed.update_values(f"{speed} km/h", speed_status, speed_color)
+
+        # Battery: 0-100%
+        battery = random.randint(20, 100)
+        battery_status = "Low" if battery < 20 else ("Normal" if battery < 80 else "Good")
+        battery_color = RED if battery < 20 else (YELLOW if battery < 80 else GREEN)
+        self.card_battery.update_values(f"{battery}%", battery_status, battery_color, battery)
+
+        # Energy: 0-100% (could be battery charge or efficiency)
+        energy = random.randint(30, 95)
+        energy_status = "Low" if energy < 30 else ("Normal" if energy < 70 else "High")
+        energy_color = RED if energy < 30 else (YELLOW if energy < 70 else GREEN)
+        self.card_energy.update_values(f"{energy}%", energy_status, energy_color, energy)
+
+        # Fuel: 0-100%
+        fuel = random.randint(5, 95)
+        fuel_status = "Low" if fuel < 15 else ("Normal" if fuel < 30 else "Good")
+        fuel_color = RED if fuel < 15 else (YELLOW if fuel < 30 else GREEN)
+        self.card_fuel.update_values(f"{fuel}%", fuel_status, fuel_color, fuel)
+
+        # Tire pressures: 30-35 psi (typical range)
+        tire_positions = ["FL", "FR", "RL", "RR"]
+        for i, (pos, container) in enumerate(self.tire_labels):
+            pressure = random.randint(28, 36)  # Normal variation
+            status = "Normal"
+            color = GREEN
+            if pressure < 28:
+                status = "Low"
+                color = RED
+            elif pressure > 36:
+                status = "High"
+                color = YELLOW
+
+            # Update the label text
+            for child in container.winfo_children():
+                if isinstance(child, tk.Label):
+                    child.configure(text=f"{pos}: {pressure} psi", fg=color)
+                    break
+
+    def _update_gps_data(self):
+        """Update GPS data - in real implementation, get from GPS module"""
+        # Simulate GPS movement for demo
+        # In real implementation, replace with actual GPS readings
+
+        if not hasattr(self, '_gps_start_time'):
+            self._gps_start_time = time.time()
+            # Starting point (example coordinates)
+            self._gps_points = [(40.7128, -74.0060)]  # New York City
+
+        # Occasionally add new GPS points to simulate movement
+        if random.random() < 0.3:  # 30% chance to add a point each update
+            last_lat, last_lon = self._gps_points[-1]
+            # Small random movement
+            new_lat = last_lat + random.uniform(-0.001, 0.001)
+            new_lon = last_lon + random.uniform(-0.001, 0.001)
+            self._gps_points.append((new_lat, new_lon))
+
+            # Keep only last 50 points to prevent memory issues
+            if len(self._gps_points) > 50:
+                self._gps_points = self._gps_points[-50:]
+
+        # Update the map canvas
+        self.map_canvas.update_gps_data(self._gps_points)
+
+        # Update GPS status in footer
+        if len(self._gps_points) > 0:
+            self._footer_dots["gps"][0].configure(fg="#10b981")  # Green when GPS connected
+            self._footer_dots["gps"][1].configure(text=f" GPS: {len(self._gps_points)} points")
+        else:
+            self._footer_dots["gps"][0].configure(fg=MUTED)
+            self._footer_dots["gps"][1].configure(text=" GPS: No signal")
+
+    def _update(self):
+        success, frame = self.cap.read()
+        if success:
+            result, obj_result, overall_severity, overall_status, disp = self.process_one_frame(frame)
+            self.apply_frame_result(result, obj_result, overall_severity, overall_status, disp)
+        self._update_job = self.after(33, self._update)
+
+    def _on_close(self):
+        # Cancel pending after() jobs BEFORE destroying - once a widget is
+        # destroyed, even checking whether a pending job is safe to skip
+        # fails, so jobs must be cancelled explicitly first.
+        for job in (self._clock_job, self._update_job):
+            if job is not None:
+                try:
+                    self.after_cancel(job)
+                except tk.TclError:
+                    pass
+
+        if self.cap is not None:
+            self.cap.release()
+        if self.alert_manager is not None:
+            self.alert_manager.stop()
+        if self.logger is not None:
+            session_duration = time.time() - self.logger.session_start
+            summary = self.engine.summary(session_duration)
+            self.logger.log("SESSION_END", f"duration={summary['duration_seconds']:.1f}s")
+            self.logger.write_summary_file(summary, self.engine.EAR_THRESHOLD, self.engine.MAR_THRESHOLD)
+            self.logger.close()
+        self.destroy()

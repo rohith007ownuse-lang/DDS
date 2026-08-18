@@ -1,0 +1,159 @@
+"""
+alert_manager.py
+Owns all sound. Non-dismissible - no snooze/dismiss method exists.
+Cross-platform implementation using subprocess to play audio.
+"""
+
+import os
+import platform
+import subprocess
+import threading
+import time
+from src.audio_synth import generate_tone_wav
+
+SEVERITY_CONFIG = {
+    "WARNING": {"pattern": [(700, 180), (0, 600)], "volume": 0.45},
+    "CRITICAL": {"pattern": [(1100, 300), (0, 120), (1100, 300), (0, 250)], "volume": 0.9},
+}
+
+
+class AlertManager:
+    def __init__(self, asset_dir=None):
+        if asset_dir is None:
+            asset_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "generated_audio")
+        self.asset_dir = os.path.abspath(asset_dir)
+        os.makedirs(self.asset_dir, exist_ok=True)
+
+        self.tone_paths = {}
+        for level, cfg in SEVERITY_CONFIG.items():
+            path = os.path.join(self.asset_dir, f"tone_{level.lower()}.wav")
+            try:
+                generate_tone_wav(path, cfg["pattern"], volume=cfg.get("volume", 0.6))
+                self.tone_paths[level] = path
+            except Exception as e:
+                print(f"[alert_manager] Failed to synthesize {level} tone: {e}")
+
+        self.current_level = None
+        self._stop_event = threading.Event()
+        self._sound_thread = None
+        self._system = platform.system()
+
+        # Check for available audio players
+        self._audio_player = self._detect_audio_player()
+        if not self._audio_player:
+            print("[alert_manager] Warning: No audio player found. Sound will be disabled.")
+
+    def _detect_audio_player(self):
+        """Detect available audio player based on OS."""
+        system = self._system
+        if system == "Linux":
+            # Try aplay, then paplay, then ffplay
+            for player in ["aplay", "paplay", "ffplay"]:
+                if self._command_exists(player):
+                    return player
+        elif system == "Darwin":  # macOS
+            if self._command_exists("afplay"):
+                return "afplay"
+        elif system == "Windows":
+            # PowerShell is always available on Windows
+            return "powershell"
+        return None
+
+    def _command_exists(self, command):
+        """Check if a command exists in PATH."""
+        try:
+            subprocess.run(
+                ["which", command] if self._system != "Windows" else ["where", command],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=True,
+            )
+            return True
+        except subprocess.CalledProcessError:
+            return False
+
+    def _build_play_command(self, wav_path):
+        """Build command to play wav file in a loop based on OS."""
+        if not self._audio_player:
+            return None
+
+        system = self._system
+        if system == "Linux":
+            if self._audio_player == "aplay":
+                # Always use shell loop for aplay since --loop option is not universally supported
+                return ["bash", "-c", f"while true; do aplay -q '{wav_path}' || break; done"]
+            elif self._audio_player == "paplay":
+                return ["paplay", "--loop", wav_path]
+            elif self._audio_player == "ffplay":
+                return ["ffplay", "-nodisp", "-autoexit", "-loop", "0", wav_path]
+        elif system == "Darwin":  # macOS
+            if self._audio_player == "afplay":
+                # afplay doesn't have loop option, use shell loop
+                return ["bash", "-c", f"while true; do afplay '{wav_path}' || break; done"]
+        elif system == "Windows":
+            if self._audio_player == "powershell":
+                # PowerShell script to loop playback - more robust version
+                ps_script = f'''
+$player = New-Object Media.SoundPlayer "{wav_path.Replace('"', '`"')}"
+while ($true) {{
+    try {{
+        $player.PlaySync()
+    }} catch {{
+        break
+    }}
+}}
+'''
+                return ["powershell", "-NoProfile", "-WindowStyle", "Hidden", "-Command", ps_script]
+        return None
+
+    def _play_sound_loop(self, wav_path):
+        """Play the given wav file in a loop until stopped."""
+        cmd = self._build_play_command(wav_path)
+        if not cmd:
+            print("[alert_manager] No audio player command available.")
+            return
+
+        try:
+            # Start the subprocess
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL,
+                creationflags=subprocess.CREATE_NO_WINDOW if self._system == "Windows" else 0
+            )
+            # Wait until stop event is set
+            while not self._stop_event.is_set():
+                time.sleep(0.1)
+            # Terminate the process
+            proc.terminate()
+            try:
+                proc.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
+        except Exception as e:
+            print(f"[alert_manager] Error playing sound: {e}")
+
+    def update(self, severity):
+        target = severity if severity in self.tone_paths else None
+        if target == self.current_level:
+            return
+        self.stop()  # Stop any currently playing sound
+        self.current_level = target
+        if target is not None and target in self.tone_paths:
+            self._stop_event.clear()
+            self._sound_thread = threading.Thread(
+                target=self._play_sound_loop,
+                args=(self.tone_paths[target],),
+                daemon=True,
+            )
+            self._sound_thread.start()
+
+    def stop(self):
+        self._stop_event.set()
+        if self._sound_thread is not None:
+            self._sound_thread.join(timeout=2.0)  # Wait up to 2 seconds for thread to finish
+            self._sound_thread = None
+        self._stop_event.clear()
+        self.current_level = None
