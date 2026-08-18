@@ -3,6 +3,7 @@ venv/
 test_venv/
 env/
 ENV/
+.venv
 
 # Python
 __pycache__/
@@ -25,26 +26,69 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+MANIFEST
+pip-log.txt
+pip-delete-this-directory.txt
 
 # IDE
 .vscode/
 .idea/
 *.swp
 *.swo
+*.swn
+*~
+.project
+.pydevproject
+.settings/
+*.sublime-project
+*.sublime-workspace
 
-# Logs (keep some logs but exclude runtime logs)
-logs/events_*.csv
-logs/summary_*.txt
+# Testing
+.pytest_cache/
+.tox/
+.coverage
+htmlcov/
+.hypothesis/
 
-# Generated audio
+# Data and logs
+data/logs/events_*.csv
+data/logs/summary_*.txt
+data/audio/
 generated_audio/
 
-# Backup files
+# Model files (too large, download on first run)
+models/*.pt
+models/*.task
+!models/.gitkeep
+
+# Backup and temp files
 *.bak
 *.bak2
+*.backup*
 *.broken
-
-# OS
+*.debug
+*.fixed
+*.tmp
+*~
 .DS_Store
+Thumbs.db
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Cache
+.cache/
+*.cache
+.pytest_cache/
+
+# OS specific
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
 

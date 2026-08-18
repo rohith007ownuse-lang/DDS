@@ -1,0 +1,234 @@
+# Driver Drowsiness Detection System - Configuration Template
+# Copy this to config/config.yaml and customize as needed
+
+# Detection Parameters
+detection:
+  # Confidence threshold for detections (0.0 - 1.0)
+  confidence_threshold: 0.7
+  
+  # Face detection confidence (0.0 - 1.0)
+  face_min_detection_confidence: 0.5
+  
+  # Frame processing settings
+  frame_width: 640
+  frame_height: 480
+  frame_skip: 0  # 0 = process every frame, 1 = skip every other frame
+  
+  # Resolution: "360p", "480p", "720p", "1080p"
+  resolution: "480p"
+  
+  # Enable GPU acceleration if available
+  use_gpu: true
+
+# Alert Thresholds (drowsiness score: 0-100)
+thresholds:
+  # Normal state: score < normal_max
+  normal_max: 40
+  
+  # Warning state: normal_max <= score < warning_max
+  warning_max: 70
+  
+  # Critical state: score >= critical_min
+  critical_min: 70
+  
+  # Minimum score change to update alert
+  alert_hysteresis: 5
+
+# Eye Detection Parameters
+eye_detection:
+  # Eye aspect ratio thresholds
+  eye_aspect_ratio_threshold: 0.2
+  
+  # Blink detection settings
+  blink_consec_frames: 3  # Frames for confirmed blink
+  
+  # PERCLOS threshold (% of eye closure)
+  perclos_threshold: 0.8
+  
+  # Blink rate range (blinks per minute)
+  normal_blink_rate_min: 15
+  normal_blink_rate_max: 30
+
+# Mouth Detection Parameters
+mouth_detection:
+  # Mouth opening ratio threshold
+  mouth_aspect_ratio_threshold: 0.5
+  
+  # Minimum frames for confirmed yawn
+  yawn_consec_frames: 5
+  
+  # Yawn detection sensitivity
+  yawn_sensitivity: 0.8
+
+# Head Pose Parameters
+head_pose:
+  # Head angle thresholds (degrees)
+  yaw_threshold: 25  # Left-right rotation
+  pitch_threshold: 20  # Up-down tilt
+  roll_threshold: 15  # Sideways tilt
+  
+  # Head nodding detection
+  detect_nodding: true
+  nod_sensitivity: 0.7
+
+# Fatigue Engine Scoring Weights
+fatigue_engine:
+  # Weight for PERCLOS in overall score
+  perclos_weight: 0.40
+  
+  # Weight for blink abnormality
+  blink_weight: 0.30
+  
+  # Weight for yawn frequency
+  yawn_weight: 0.20
+  
+  # Weight for head movements
+  head_weight: 0.10
+  
+  # Smoothing factor for score (0.0-1.0)
+  # Higher = smoother but more lag
+  smoothing_factor: 0.7
+  
+  # History length for temporal analysis (frames)
+  history_length: 100
+
+# Alert Configuration
+alert:
+  # Enable alerts
+  enabled: true
+  
+  # Minimum score to trigger any alert
+  alert_threshold: 40
+  
+  # Cooldown between alerts (seconds)
+  alert_cooldown: 5
+  
+  # Alert escalation: trigger louder alert if no response
+  escalation_enabled: true
+  escalation_cooldown: 15  # seconds
+  
+  # Alert types: "sound", "voice", "visual", or "all"
+  alert_type: "all"
+
+# Audio Configuration
+audio:
+  # Enable audio output
+  enabled: true
+  
+  # Alert volume (0.0 - 1.0)
+  volume: 0.8
+  
+  # Alert sound types
+  # "bell", "alarm", "beep", "voice", "siren"
+  alert_sound_type: "bell"
+  
+  # Voice alert message
+  voice_message: "Wake up! Focus on the road!"
+  
+  # Text-to-speech settings
+  tts_rate: 150  # words per minute
+  tts_volume: 1.0  # 0.0-1.0
+
+# UI Configuration
+ui:
+  # Dashboard refresh rate (FPS)
+  refresh_rate: 30
+  
+  # Display settings
+  show_landmarks: true  # Show face landmarks overlay
+  show_fps: true  # Show FPS counter
+  show_metrics: true  # Show detailed metrics panel
+  
+  # Night mode for low-light driving
+  night_mode: false
+  night_mode_tint: 0.3  # 0.0-1.0 (darkness level)
+  
+  # Color scheme: "light", "dark", "auto"
+  theme: "dark"
+  
+  # Window size
+  window_width: 1280
+  window_height: 720
+  
+  # Font settings
+  font_name: "TkDefaultFont"
+  font_size: 10
+
+# Session Logging
+logging:
+  # Enable event logging
+  enabled: true
+  
+  # Log directory
+  log_directory: "data/logs"
+  
+  # Log level: "DEBUG", "INFO", "WARNING", "ERROR"
+  level: "INFO"
+  
+  # Log frequency: log every N frames (1 = log every frame)
+  event_frequency: 30
+  
+  # Include detailed metrics in logs
+  detailed_metrics: true
+  
+  # Auto-save session summary
+  auto_save_summary: true
+
+# Calibration Settings
+calibration:
+  # Duration of calibration phase (seconds)
+  duration: 5
+  
+  # Number of samples to collect
+  num_samples: 100
+  
+  # Auto-calibrate on startup
+  auto_calibrate: true
+  
+  # Recalibration interval (seconds, 0 = disabled)
+  recalibration_interval: 300
+
+# Detector Configuration
+detectors:
+  # Enable/disable individual detectors
+  face_detection_enabled: true
+  eye_detection_enabled: true
+  mouth_detection_enabled: true
+  head_pose_enabled: true
+  object_detection_enabled: true
+  
+  # Object detection focus
+  # What to detect: "person", "phone", "cup", "hands", "all"
+  object_focus: "all"
+
+# Performance Optimization
+performance:
+  # Multi-threading
+  use_threading: true
+  num_threads: 4
+  
+  # Frame buffering
+  buffer_size: 5
+  
+  # Memory optimization
+  gc_interval: 100  # Garbage collect every N frames
+  
+  # Profile performance
+  profile: false
+
+# Advanced Settings
+advanced:
+  # Debug mode
+  debug: false
+  
+  # Save debug frames
+  save_debug_frames: false
+  debug_frame_dir: "data/debug_frames"
+  
+  # Model configuration
+  model_path_face: "models/face_landmarker.task"
+  model_path_yolo: "models/yolov8n.pt"
+  
+  # Custom parameters
+  custom_parameter_1: null
+  custom_parameter_2: null
