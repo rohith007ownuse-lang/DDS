@@ -1,5 +1,6 @@
-opencv-python
-mediapipe
-numpy
-ultralytics
-Pillow
+opencv-python>=4.8.0
+mediapipe>=0.10.0
+numpy>=1.21.0
+ultralytics>=8.0.0
+Pillow>=9.0.0
+pyttsx3>=2.90  # Text-to-speech for audio alerts
