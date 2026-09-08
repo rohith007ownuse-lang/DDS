@@ -88,6 +88,8 @@ Thumbs.db
 
 # Graphify local-only files
 cost.json
+# Dated graph snapshots auto-created by the post-commit hook
+graphify-out/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/
 
 # OS specific
 .DS_Store

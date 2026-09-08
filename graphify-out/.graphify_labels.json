@@ -1,1 +1,20 @@
-{"0": "DrowsiGuardApp", "1": "get_config", "2": "SerialCommunicator", "3": "fatigue_engine.py", "4": "test_ui.py", "5": "MapCanvas", "6": "ConfigManager", "7": "EnhancedSessionLogger", "8": "FatigueEngine", "9": "face_detection.py", "10": "AlertManager", "11": "VehicleControlPanel", "12": "SessionLogger", "13": "core/__init__.py", "14": "detectors/__init__.py", "15": "hardware/__init__.py", "16": "src/__init__.py", "17": "ui/__init__.py"}
+{
+  "0": "DrowsiGuardApp",
+  "1": "get_config",
+  "2": "SerialCommunicator",
+  "3": "fatigue_engine.py",
+  "4": "test_ui.py",
+  "5": "MapCanvas",
+  "6": "Hardware Integration Plan for Driver Drowsiness Detection System",
+  "7": "EnhancedSessionLogger",
+  "8": "ObjectDetector",
+  "9": "face_detection.py",
+  "10": "AlertManager",
+  "11": "VehicleControlPanel",
+  "12": "SessionLogger",
+  "13": "core/__init__.py",
+  "14": "detectors/__init__.py",
+  "15": "hardware/__init__.py",
+  "16": "src/__init__.py",
+  "17": "ui/__init__.py"
+}
