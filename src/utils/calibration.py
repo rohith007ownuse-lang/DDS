@@ -10,14 +10,14 @@ import time
 import cv2
 import numpy as np
 
-from src.utils import (
+from src.utils.utils import (
     CANVAS_W, CANVAS_H, COL_BG, COL_PANEL, COL_PANEL_EDGE,
     COL_TEXT, COL_SUBTEXT, COL_CYAN, COL_GREEN, COL_AMBER,
     rounded_rect, put_text, draw_corner_brackets
 )
-from src.eye_detection import LEFT_EYE, RIGHT_EYE, calculate_avg_ear
-from src.mouth_detection import calculate_mar
-from src.head_pose import get_head_pose
+from src.detectors.eye_detection import LEFT_EYE, RIGHT_EYE, calculate_avg_ear
+from src.detectors.mouth_detection import calculate_mar
+from src.detectors.head_pose import get_head_pose
 
 CALIBRATION_DURATION = 5.0
 MIN_CALIBRATION_SAMPLES = 15

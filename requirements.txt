@@ -3,4 +3,5 @@ mediapipe>=0.10.0
 numpy>=1.21.0
 ultralytics>=8.0.0
 Pillow>=9.0.0
-pyttsx3>=2.90  # Text-to-speech for audio alerts
+pyserial>=3.5
+pyttsx3>=2.90

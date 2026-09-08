@@ -95,5 +95,7 @@ class HeadPoseTracker:
         self._start = None
         return 0.0, False, deviation
 
+    def reset(self):
+       self._start = None
 
 HeadNodTracker = HeadPoseTracker

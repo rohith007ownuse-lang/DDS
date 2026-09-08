@@ -7,7 +7,7 @@ Phone/drink detection using stock pretrained YOLOv8n. Monitor-only
 import time
 import os
 from ultralytics import YOLO
-from src.severity import severity_for
+from src.core.severity import severity_for
 
 CLASS_PHONE = 67
 CLASS_BOTTLE = 39

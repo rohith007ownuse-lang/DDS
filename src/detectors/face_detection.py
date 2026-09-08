@@ -12,8 +12,8 @@ import os
 import urllib.request
 
 # Model path - relative to project root
-MODEL_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-MODEL_PATH = os.path.join(MODEL_DIR, 'face_landmarker.task')
+MODEL_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+MODEL_PATH = os.path.join(MODEL_DIR, 'models', 'face_landmarker.task')
 MODEL_URL = 'https://storage.googleapis.com/mediapipe-models/face_landmarker/float16/1/face_landmarker.task'
 
 # Flag to track if we've already attempted download

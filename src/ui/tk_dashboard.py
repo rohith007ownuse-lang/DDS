@@ -15,7 +15,7 @@ vehicle speed gauge (no OBD-II connected) and the live-location map
 demos rather than removed, but labeled so nobody mistakes them for
 live data.
 """
-
+from src.utils.config_manager import get_config
 import time
 import math
 import tkinter as tk
@@ -27,20 +27,25 @@ import random
 from src.utils import (
     COL_RED as _RED, COL_AMBER as _AMBER, COL_GREEN as _GREEN, COL_CYAN as _CYAN
 )
+from src.ui.vehicle_control_panel import VehicleControlPanel
 
 # ---------------- palette (hex, since this file is Tkinter not cv2) ----------------
-BG      = "#0d1117"
-PANEL   = "#161b22"
-CARD    = "#1c2128"
-BORDER  = "#30363d"
-TEXT    = "#e6edf3"
-MUTED   = "#8b949e"
-RED     = "#f85149"
-RED_DIM = "#3d1a1a"
-ORANGE  = "#fb923c"
-YELLOW  = "#f59e0b"
-GREEN   = "#3fb950"
-BLUE    = "#58a6ff"
+BG      = "#FFFFFF"
+PANEL   = "#F7F9FB"
+CARD    = "#FFFFFF"
+BORDER  = "#D9E0E7"
+TEXT    = "#17212B"
+MUTED   = "#66727E"
+RED     = "#E53935"
+RED_DIM = "#FEF2F2"
+ORANGE  = "#F5A623"
+YELLOW  = "#F5A623"
+GREEN   = "#22A447"
+BLUE    = "#2196F3"
+ACCENT_BLUE = "#66B2FF"
+DARK_BLUE = "#001A33"
+MID_BLUE = "#003366"
+LIGHT_BLUE = "#0066CC"
 
 
 def pct_color(pct):
@@ -55,7 +60,7 @@ def pct_word(pct):
     if pct >= 70:
         return "Critical"
     if pct >= 35:
-        return "Elevated"
+        return "Warning"
     return "Normal"
 
 
@@ -66,30 +71,36 @@ class MetricCard(tk.Frame):
         super().__init__(parent, bg=CARD, highlightbackground=BORDER, highlightthickness=1)
         self.show_bar = show_bar
         self.bar_color = bar_color
+        self.configure(width=155, height=60)
+        self.pack_propagate(False)
 
-        tk.Label(self, text=label, bg=CARD, fg=MUTED, font=("Courier", 8)).pack(anchor="w", padx=6, pady=(5, 0))
+        # Label
+        tk.Label(self, text=label, bg=CARD, fg=MUTED, font=("JetBrains Mono", 9, "bold")).pack(anchor="w", padx=8, pady=(6, 0))
 
+        # Value row
         row = tk.Frame(self, bg=CARD)
-        row.pack(anchor="w", padx=6)
-        self.value_label = tk.Label(row, text=value, bg=CARD, fg=TEXT, font=("Courier", 16, "bold"))
+        row.pack(anchor="w", padx=8)
+        self.value_label = tk.Label(row, text=value, bg=CARD, fg=TEXT, font=("JetBrains Mono", 20, "bold"))
         self.value_label.pack(side="left")
         self.unit_label = None
-        if unit:
-            self.unit_label = tk.Label(row, text=unit, bg=CARD, fg=MUTED, font=("Courier", 8))
-            self.unit_label.pack(side="left", padx=(2, 0), pady=(4, 0))
+        if unit and not value.endswith(unit):
+            self.unit_label = tk.Label(row, text=unit, bg=CARD, fg=MUTED, font=("JetBrains Mono", 9))
+            self.unit_label.pack(side="left", padx=(3, 0), pady=(5, 0))
 
-        self.status_label = tk.Label(self, text=status, bg=CARD, fg=status_color, font=("Courier", 7))
-        self.status_label.pack(anchor="w", padx=6)
+        # Status label
+        self.status_label = tk.Label(self, text=status, bg=CARD, fg=status_color, font=("JetBrains Mono", 8))
+        self.status_label.pack(anchor="w", padx=8)
 
+        # Progress bar
         self.bar_fg = None
         if show_bar:
-            bar_bg = tk.Frame(self, bg=BORDER, height=4)
-            bar_bg.pack(fill="x", padx=6, pady=(3, 5))
+            bar_bg = tk.Frame(self, bg=BORDER, height=3)
+            bar_bg.pack(fill="x", padx=8, pady=(2, 6))
             bar_bg.pack_propagate(False)
-            self.bar_fg = tk.Frame(bar_bg, bg=bar_color, height=4)
+            self.bar_fg = tk.Frame(bar_bg, bg=bar_color, height=3)
             self.bar_fg.place(relwidth=bar_pct / 100, relheight=1)
         else:
-            tk.Frame(self, bg=CARD, height=6).pack()
+            tk.Frame(self, bg=CARD, height=4).pack()
 
     def update_values(self, value=None, status=None, status_color=None, bar_pct=None):
         """Reconfigure this card's widgets in place - no recreation, no flicker."""
@@ -108,7 +119,7 @@ class MetricCard(tk.Frame):
 # ---------------- Video canvas: REAL webcam frame + real overlays ----------------
 class VideoCanvas(tk.Canvas):
     def __init__(self, parent, **kw):
-        super().__init__(parent, bg="black", highlightthickness=0, **kw)
+        super().__init__(parent, bg="#FFFFFF", highlightthickness=0, **kw)
         self._photo = None  # must keep a reference or Tkinter garbage-collects it
         self._tick = 0
 
@@ -117,27 +128,28 @@ class VideoCanvas(tk.Canvas):
         by the caller (main.py) - this method only handles display + the
         severity banner overlay."""
         self._tick += 1
-        w = self.winfo_width() or 640
-        h = self.winfo_height() or 360
+        w = self.winfo_width() or 1000
+        h = self.winfo_height() or 450
 
         frame = cv2.resize(bgr_frame, (w, h))
 
         if overall_severity in ("WARNING", "CRITICAL"):
             color = (0, 0, 255) if overall_severity == "CRITICAL" else (0, 165, 255)
-            box_w, box_h = 240, 60
-            bx, by = (w - box_w) // 2, h // 2 - 60
+            box_w, box_h = 400, 90
+            bx, by = (w - box_w) // 2, h // 2 - 100
             overlay = frame.copy()
-            cv2.rectangle(overlay, (bx, by), (bx + box_w, by + box_h), (10, 10, 10), -1)
-            cv2.addWeighted(overlay, 0.75, frame, 0.25, 0, dst=frame)
-            cv2.rectangle(frame, (bx, by), (bx + box_w, by + box_h), color, 2)
-            label = "WARNING" if overall_severity == "WARNING" else "CRITICAL"
-            cv2.putText(frame, label, (bx + 20, by + 26), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2, cv2.LINE_AA)
+            cv2.rectangle(overlay, (bx, by), (bx + box_w, by + box_h), (255, 255, 255), -1)
+            cv2.addWeighted(overlay, 0.9, frame, 0.1, 0, dst=frame)
+            cv2.rectangle(frame, (bx, by), (bx + box_w, by + box_h), color, 3)
+            label = "⚠ DROWSINESS DETECTED" if overall_severity == "CRITICAL" else "⚠ WARNING"
+            cv2.putText(frame, label, (bx + 20, by + 35), cv2.FONT_HERSHEY_SIMPLEX, 0.9, color, 2, cv2.LINE_AA)
             sub = (overall_status or "").title()
-            cv2.putText(frame, sub, (bx + 15, by + 48), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (255, 255, 255), 1, cv2.LINE_AA)
+            cv2.putText(frame, sub, (bx + 20, by + 65), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 1, cv2.LINE_AA)
 
-        rec_color = (0, 0, 255) if self._tick % 20 < 10 else (60, 0, 0)
-        cv2.circle(frame, (16, 16), 5, rec_color, -1)
-        cv2.putText(frame, "LIVE", (26, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (100, 220, 100), 1, cv2.LINE_AA)
+        # LIVE indicator
+        rec_color = (0, 200, 0) if self._tick % 20 < 10 else (0, 150, 0)
+        cv2.circle(frame, (20, 20), 6, rec_color, -1)
+        cv2.putText(frame, "LIVE", (32, 26), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 180, 0), 1, cv2.LINE_AA)
 
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         img = Image.fromarray(rgb)
@@ -149,7 +161,7 @@ class VideoCanvas(tk.Canvas):
 # ---------------- Enhanced Map Canvas: Custom PNG background with guided path ----------------
 class MapCanvas(tk.Canvas):
     def __init__(self, parent, map_image_path=None, vehicle_path=None, **kw):
-        super().__init__(parent, bg="#1a2030", highlightthickness=0, **kw)
+        super().__init__(parent, bg="#FFFFFF", highlightthickness=0, **kw)
         self._after_job = None
         self._map_image = None
         self._map_image_tk = None
@@ -289,7 +301,7 @@ class MapCanvas(tk.Canvas):
 
     def _draw(self):
         self.delete("all")
-        w, h = self.winfo_width() or 300, self.winfo_height() or 100
+        w, h = self.winfo_width() or 1000, self.winfo_height() or 300
 
         # Prevent drawing if canvas has zero size
         if w <= 1 or h <= 1:
@@ -319,15 +331,15 @@ class MapCanvas(tk.Canvas):
                     self._map_offset_y = offset_y
                     self._map_scale = scale
                 else:
-                    # Fall back to colored background if image is invalid
-                    self.create_rectangle(0, 0, w, h, fill="#1a2030")
+                    # Fall back to light background if image is invalid
+                    self.create_rectangle(0, 0, w, h, fill="#F7F9FB", outline="")
             except Exception as e:
                 print(f"Error drawing map image: {e}")
-                # Fall back to colored background
-                self.create_rectangle(0, 0, w, h, fill="#1a2030")
+                # Fall back to light background
+                self.create_rectangle(0, 0, w, h, fill="#F7F9FB", outline="")
         else:
-            # Draw dark background
-            self.create_rectangle(0, 0, w, h, fill="#1a2030")
+            # Draw light background
+            self.create_rectangle(0, 0, w, h, fill="#F7F9FB", outline="")
 
         # Draw route (either demo path or real GPS)
         if self._show_demo_route or len(self._gps_data) < 2:
@@ -342,9 +354,9 @@ class MapCanvas(tk.Canvas):
 
         # Add label
         label_text = "LIVE MAP" if not self._show_demo_route and self._gps_data else "GUIDED MAP - Following Route"
-        label_color = "#10b981" if not self._show_demo_route and self._gps_data else "#fbbf24"
+        label_color = GREEN if not self._show_demo_route and self._gps_data else YELLOW
         self.create_text(w - 6, h - 4, text=label_text, fill=label_color,
-                          font=("Courier", 8, "bold"), anchor="se")
+                          font=("JetBrains Mono", 8, "bold"), anchor="se")
 
     def _draw_vehicle_path(self, w, h):
         """Draw the predefined path"""
@@ -366,9 +378,9 @@ class MapCanvas(tk.Canvas):
 
         if len(canvas_points) >= 4:
             # Draw the path line
-            self.create_line(*canvas_points, fill="#10b981", width=3, smooth=True)
+            self.create_line(*canvas_points, fill=BLUE, width=3, smooth=True)
             # Draw subtle dotted line underneath for depth
-            self.create_line(*canvas_points, fill="#059669", width=1, dash=(4, 2), smooth=True)
+            self.create_line(*canvas_points, fill=MID_BLUE, width=1, dash=(4, 2), smooth=True)
 
     def _draw_gps_route(self, w, h):
         """Draw real GPS route"""
@@ -398,11 +410,11 @@ class MapCanvas(tk.Canvas):
             points.extend([x, y])
 
         if len(points) >= 4:
-            self.create_line(*points, fill="#10b981", width=3, smooth=True)
+            self.create_line(*points, fill=BLUE, width=3, smooth=True)
             # Draw points
             for i in range(0, len(points), 2):
                 x, y = points[i], points[i+1]
-                self.create_oval(x-3, y-3, x+3, y+3, fill="#34d399", outline="")
+                self.create_oval(x-3, y-3, x+3, y+3, fill=ACCENT_BLUE, outline="")
 
     def _draw_vehicle_indicator(self, w, h):
         """Draw the vehicle icon at current position"""
@@ -436,7 +448,7 @@ class MapCanvas(tk.Canvas):
 
         # Draw vehicle icon (rotated based on heading)
         self._draw_rotated_polygon(pos_x, pos_y, self.vehicle_points, heading,
-                                  fill="#dc2626", outline="#ffffff", width=1)
+                                  fill=RED, outline="#ffffff", width=1)
 
     def _draw_rotated_polygon(self, x, y, points, angle_degrees, **options):
         """Draw a polygon rotated around point (x, y) by angle_degrees"""
@@ -471,8 +483,8 @@ class DrowsiGuardApp(tk.Tk):
         super().__init__()
         self.title("DrowsiGuard - Driver Monitoring System")
         self.configure(bg=BG)
-        self.geometry("1200x800")  # Slightly larger default size
-        self.minsize(1000, 700)
+        self.geometry("1664x936")  # Reference resolution
+        self.minsize(1400, 850)
 
         self.cap = cap
         self.detect_face = face_mesh_module.detect_face
@@ -482,8 +494,8 @@ class DrowsiGuardApp(tk.Tk):
         self.alert_manager = alert_manager
         self.logger = logger
         self.test_mode = test_mode
+        self.config = get_config()  # For UI configuration access
 
-        self.night_mode = False
         self.alert_threshold = 70
         self.session_start = logger.session_start if logger else time.time()
 
@@ -503,7 +515,7 @@ class DrowsiGuardApp(tk.Tk):
         ]
 
         self._build_header()
-        self._build_body()
+        self._build_body(self)
         self._build_bottom()
         self._build_footer()
 
@@ -513,136 +525,130 @@ class DrowsiGuardApp(tk.Tk):
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self._tick_clock()
 
+        self.vehicle_panel = VehicleControlPanel(master=self, engine=self.engine)
+        self.vehicle_panel.start_monitoring()
+
         if not test_mode:
             self._update_job = self.after(33, self._update)
 
-    # ---------------- header ----------------
+# ---------------- header ----------------
     def _build_header(self):
-        hdr = tk.Frame(self, bg=PANEL, height=40)
-        hdr.pack(fill="x")
+        hdr = tk.Frame(self, bg=BG, height=55)
+        hdr.pack(fill="x", padx=25, pady=(20, 0))
         hdr.pack_propagate(False)
 
-        left = tk.Frame(hdr, bg=PANEL)
-        left.pack(side="left", padx=10, pady=6)
-        logo = tk.Frame(left, bg=BLUE, width=22, height=22)
-        logo.pack(side="left")
-        logo.pack_propagate(False)
-        tk.Label(logo, text="D", bg=BLUE, fg="white", font=("Courier", 11, "bold")).place(relx=0.5, rely=0.5, anchor="center")
-        tk.Label(left, text=" DrowsiGuard", bg=PANEL, fg=BLUE, font=("Courier", 12, "bold")).pack(side="left")
-        tk.Label(left, text="  Driver Monitoring System", bg=PANEL, fg=MUTED, font=("Courier", 8)).pack(side="left")
+        # Left section: Logo + App name
+        left = tk.Frame(hdr, bg=BG)
+        left.pack(side="left", pady=6)
 
-        right = tk.Frame(hdr, bg=PANEL)
-        right.pack(side="right", padx=10, pady=6)
+        # D Logo - blue square with white D
+        logo = tk.Frame(left, bg=BLUE, width=24, height=24)
+        logo.pack(side="left", padx=(0, 10))
+        logo.pack_propagate(False)
+        tk.Label(logo, text="D", bg=BLUE, fg="white", font=("JetBrains Mono", 12, "bold")).place(relx=0.5, rely=0.5, anchor="center")
+
+        # App name and subtitle
+        name_frame = tk.Frame(left, bg=BG)
+        name_frame.pack(side="left")
+        tk.Label(name_frame, text="DrowsiGuard", bg=BG, fg=TEXT, font=("JetBrains Mono", 20, "bold")).pack(anchor="w")
+        tk.Label(name_frame, text="Driver Monitoring System", bg=BG, fg=MUTED, font=("JetBrains Mono", 11)).pack(anchor="w")
+
+        # RESET button - positioned after app name
+        self._build_one_touch_action(hdr)
+
+        # Right section: Camera status, Night mode, Clock
+        right = tk.Frame(hdr, bg=BG)
+        right.pack(side="right", pady=6)
 
         self._clock_var = tk.StringVar(value="--:-- --")
-        tk.Label(right, textvariable=self._clock_var, bg=PANEL, fg=MUTED, font=("Courier", 9)).pack(side="right", padx=(10, 0))
+        tk.Label(right, textvariable=self._clock_var, bg=BG, fg=MUTED, font=("JetBrains Mono", 11)).pack(side="right", padx=(20, 0))
 
-        self._night_btn = tk.Label(right, text="Night Mode: OFF", bg="#21262d", fg="#93c5fd",
-                                    font=("Courier", 8), padx=6, pady=2, cursor="hand2")
-        self._night_btn.pack(side="right", padx=6)
-        self._night_btn.bind("<Button-1>", self._toggle_night_mode)
-
-        cam = tk.Frame(right, bg=PANEL)
-        cam.pack(side="right")
+        cam = tk.Frame(right, bg=BG)
+        cam.pack(side="right", padx=12)
         cam_ok = self.cap is not None and (self.test_mode or self.cap.isOpened())
-        tk.Label(cam, text="●", bg=PANEL, fg=(GREEN if cam_ok else RED), font=("Courier", 8)).pack(side="left")
-        tk.Label(cam, text=f" Camera: {'Active' if cam_ok else 'Unavailable'}", bg=PANEL, fg=MUTED, font=("Courier", 8)).pack(side="left")
+        self._camera_dot = tk.Label(cam, text="●", bg=BG, fg=(GREEN if cam_ok else RED), font=("JetBrains Mono", 10))
+        self._camera_dot.pack(side="left")
+        self._camera_label = tk.Label(cam, text=f" Camera: {'Active' if cam_ok else 'Inactive'}", bg=BG, fg=MUTED, font=("JetBrains Mono", 9))
+        self._camera_label.pack(side="left")
 
-        tk.Frame(self, bg=BORDER, height=1).pack(fill="x")
+        # Separator line
+        tk.Frame(self, bg=BORDER, height=1).pack(fill="x", padx=25)
 
-    def _toggle_night_mode(self, event=None):
-        self.night_mode = not self.night_mode
-        self._night_btn.configure(text=f"Night Mode: {'ON' if self.night_mode else 'OFF'}",
-                                   fg=("#fbbf24" if self.night_mode else "#93c5fd"))
+    def _build_one_touch_action(self, parent):
+        """Emergency reset button: clears fatigue counters and stops any active alert tone."""
+        def do_reset(event=None):
+            self.engine.reset()
+            if self.alert_manager:
+                self.alert_manager.stop()
+            if hasattr(self, 'vehicle_panel') and self.vehicle_panel is not None:
+                self.vehicle_panel._cmd_reset()
+            if self.logger:
+                self.logger.log("RESET", "Manual reset triggered")
+            print("[OneTouchAction] Reset performed.")
+        btn = tk.Label(parent, text="RESET", bg=RED, fg="white",
+                        font=("JetBrains Mono", 9, "bold"), padx=12, pady=3, cursor="hand2")
+        btn.pack(side="left", padx=20)
+        btn.bind("<Button-1>", do_reset)
 
-    # ---------------- body ----------------
-    def _build_body(self):
-        body = tk.Frame(self, bg=BG)
+        # Vehicle Control panel launcher
+        def open_vehicle_panel(event=None):
+            self.vehicle_panel.deiconify()
+            self.vehicle_panel.lift()
+            self.vehicle_panel.focus_force()
+        vc_btn = tk.Label(parent, text="VEHICLE CONTROL", bg=BLUE, fg="white",
+                          font=("JetBrains Mono", 9, "bold"), padx=12, pady=3, cursor="hand2")
+        vc_btn.pack(side="left", padx=(0, 20))
+        vc_btn.bind("<Button-1>", open_vehicle_panel)
+
+    def _build_body(self, parent):
+        body = tk.Frame(parent, bg=BG)
         body.pack(fill="both", expand=True)
         self._build_left(body)
         self._build_center(body)
         self._build_right(body)
 
     def _build_left(self, parent):
-        left = tk.Frame(parent, bg=PANEL, width=180)  # Slightly reduced width
-        left.pack(side="left", fill="y")
+        left = tk.Frame(parent, bg=BG, width=160)
+        left.pack(side="left", fill="y", padx=(25, 0), pady=10)
         left.pack_propagate(False)
-        tk.Frame(parent, bg=BORDER, width=1).pack(side="left", fill="y")
 
-        tk.Label(left, text="Real-Time Metrics", bg=PANEL, fg=MUTED, font=("Courier", 7, "bold")).pack(anchor="w", padx=8, pady=(6, 4))
+        tk.Label(left, text="Real-Time Metrics", bg=BG, fg=MUTED, font=("JetBrains Mono", 11, "bold")).pack(anchor="w", padx=0, pady=(0, 8))
 
-        self.card_fatigue = MetricCard(left, "Fatigue Level", "0%", status="Normal", status_color=GREEN, bar_color=GREEN, bar_pct=0)
-        self.card_attention = MetricCard(left, "Attention Score", "100%", status="Good", status_color=GREEN, bar_color=GREEN, bar_pct=100)
-        self.card_perclos = MetricCard(left, "PERCLOS", "0%", status="Normal", status_color=GREEN, bar_color=GREEN, bar_pct=0)
-        self.card_eye = MetricCard(left, "Eye Closure", "0.00s", status="Normal", status_color=GREEN, show_bar=False)
-        self.card_yawns = MetricCard(left, "Yawns", "0", status="This session", status_color=MUTED, show_bar=False)
-        self.card_gaze = MetricCard(left, "Gaze Direction", "N/A", status="Not tracked yet", status_color=MUTED, show_bar=False)
+        self.card_fatigue = MetricCard(left, "Fatigue Level", "0%", "%", "Normal", GREEN, True, GREEN, 0)
+        self.card_attention = MetricCard(left, "Attention Score", "100%", "%", "Good", GREEN, True, GREEN, 100)
+        self.card_perclos = MetricCard(left, "PERCLOS", "0%", "%", "Normal", GREEN, True, GREEN, 0)
+        self.card_eye = MetricCard(left, "Eye Closure", "0.00s", "s", "Normal", GREEN, False)
+        self.card_yawns = MetricCard(left, "Yawns", "0", "", "This session", MUTED, False)
+        self.card_gaze = MetricCard(left, "Gaze Direction", "Center", "", "Tracking", MUTED, False)
 
         for card in (self.card_fatigue, self.card_attention, self.card_perclos,
                      self.card_eye, self.card_yawns, self.card_gaze):
-            card.pack(fill="x", padx=6, pady=2)
+            card.pack(fill="x", pady=3)
 
-        tags_frame = tk.Frame(left, bg=PANEL)
-        tags_frame.pack(fill="x", padx=6, pady=(6, 2), side="bottom")
+        # Distraction indicators
+        tags_frame = tk.Frame(left, bg=BG)
+        tags_frame.pack(fill="x", padx=0, pady=(12, 0))
         self._tag_widgets = {}
         for tag in ["phone", "drink", "smoke"]:
             t = tk.Frame(tags_frame, bg=CARD, highlightbackground=BORDER, highlightthickness=1)
             t.pack(fill="x", pady=2)
-            label_text = tag if tag != "smoke" else "smoke (planned)"
-            lbl = tk.Label(t, text=label_text, bg=CARD, fg=MUTED, font=("Courier", 9))
-            lbl.pack(padx=8, pady=3)
+            label_text = tag.capitalize() if tag != "smoke" else "Smoke (planned)"
+            lbl = tk.Label(t, text=label_text, bg=CARD, fg=MUTED, font=("JetBrains Mono", 9))
+            lbl.pack(padx=10, pady=5)
             self._tag_widgets[tag] = (t, lbl)
 
     def _build_center(self, parent):
         center = tk.Frame(parent, bg=BG)
-        center.pack(side="left", fill="both", expand=True, padx=4, pady=4)
+        center.pack(side="left", fill="both", expand=True, padx=(15, 0), pady=10)
 
-        tk.Label(center, text="Driver Status", bg=BG, fg="#c9d1d9", font=("Courier", 9, "bold")).pack(anchor="w", padx=4, pady=(2, 4))
+        # Driver Status header
+        header_frame = tk.Frame(center, bg=BG)
+        header_frame.pack(fill="x", padx=4, pady=(0, 4))
+        tk.Label(header_frame, text="Driver Status", bg=BG, fg=TEXT, font=("JetBrains Mono", 14, "bold")).pack(side="left")
 
-        # REDUCED video size as requested - made smaller
-        self.video_canvas = VideoCanvas(center, height=150)  # Significantly smaller!
-        self.video_canvas.pack(fill="both", expand=True, padx=4, pady=(4, 2))
-
-        # Alert threshold controls
-        thresh_frame = tk.Frame(center, bg=BG)
-        thresh_frame.pack(fill="x", padx=4, pady=2)
-        tk.Label(thresh_frame, text="Alert Threshold:", bg=BG, fg=MUTED, font=("Courier", 8)).pack(side="left", padx=(0, 6))
-
-        self._threshold_labels = {}
-        for val in [60, 70, 80, 90]:
-            lbl = tk.Label(thresh_frame, text=f"{val}%", font=("Courier", 8, "bold"), padx=10, pady=3, cursor="hand2")
-            lbl.pack(side="left", padx=2)
-            lbl.bind("<Button-1>", lambda e, v=val: self._set_threshold(v))
-            self._threshold_labels[val] = lbl
-        self._refresh_threshold_pills()
-
-        # INCREASED alert system size - made more prominent
-        alert_frame = tk.Frame(center, bg=BG)
-        alert_frame.pack(fill="both", expand=True, padx=4, pady=(2, 4))
-
-        # Alert container with better styling
-        self.alerts_container = tk.Frame(alert_frame, bg=PANEL, highlightbackground=BORDER, highlightthickness=1)
-        self.alerts_container.pack(fill="both", expand=True, padx=4, pady=4)
-
-        self.no_alert_label = tk.Label(self.alerts_container, text="No active alerts", bg=PANEL, fg=GREEN, font=("Courier", 10, "bold"))
-        self.no_alert_label.pack(anchor="w", padx=10, pady=10)
-
-        # Recommended actions panel (now positioned below alerts for better flow)
-        rec_frame = tk.Frame(alert_frame, bg=BG)
-        rec_frame.pack(fill="x", padx=4, pady=(4, 0))
-
-        rec = tk.Frame(rec_frame, bg=CARD, highlightbackground=BORDER, highlightthickness=1)
-        rec.pack(fill="x", padx=6, pady=(10, 2))
-        tk.Label(rec, text="Recommended Actions", bg=CARD, fg=TEXT, font=("Courier", 8, "bold")).pack(anchor="w", padx=6, pady=(5, 3))
-        self.rec_labels = []
-        for color, txt in [(BLUE, "→ Pull over when safe"), (YELLOW, "→ Take a 15-20 min break"),
-                            (GREEN, "→ Open a window for fresh air")]:
-            l = tk.Label(rec, text=txt, bg=CARD, fg=color, font=("Courier", 7))
-            l.pack(anchor="w", padx=6, pady=1)
-            self.rec_labels.append(l)
-        tk.Frame(rec, bg=CARD, height=4).pack()
-        self.rec_panel = rec
-        self.rec_panel.pack_forget()  # only shown when there's an active alert
+        # Camera panel - larger size
+        self.video_canvas = VideoCanvas(center, height=450)
+        self.video_canvas.pack(fill="both", expand=True, padx=4, pady=(4, 8))
 
     def _set_threshold(self, val):
         self.alert_threshold = val
@@ -654,117 +660,273 @@ class DrowsiGuardApp(tk.Tk):
             lbl.configure(bg=YELLOW if active else CARD, fg="black" if active else MUTED)
 
     def _build_right(self, parent):
-        tk.Frame(parent, bg=BORDER, width=1).pack(side="left", fill="y")
-        right = tk.Frame(parent, bg=PANEL, width=200)  # Slightly reduced width
-        right.pack(side="left", fill="y")
+        tk.Frame(parent, bg=BORDER, width=1).pack(side="left", fill="y", padx=15)
+        right = tk.Frame(parent, bg=BG, width=390)
+        right.pack(side="left", fill="y", padx=(0, 25), pady=10)
         right.pack_propagate(False)
 
-        tk.Label(right, text="Alert:", bg=PANEL, fg=MUTED, font=("Courier", 7, "bold")).pack(anchor="w", padx=8, pady=(6, 4))
+        # ▲ Alert System header
+        alert_header = tk.Frame(right, bg=BG)
+        alert_header.pack(fill="x", padx=20, pady=(12, 6))
+        tk.Label(alert_header, text="▲", bg=BG, fg=RED, font=("JetBrains Mono", 10)).pack(side="left")
+        tk.Label(alert_header, text=" Alert System", bg=BG, fg=RED, font=("JetBrains Mono", 10, "bold")).pack(side="left")
 
-        # Note: Alerts now have their own dedicated space in center panel
-        # This panel can be used for additional info or left empty
-        info_label = tk.Label(right, text="System Info", bg=PANEL, fg=MUTED, font=("Courier", 7, "italic"))
-        info_label.pack(anchor="w", padx=8, pady=(6, 4))
+        # System Info block
+        info_label = tk.Label(right, text="System Info", bg=BG, fg=MUTED, font=("JetBrains Mono", 8, "bold"))
+        info_label.pack(anchor="w", padx=20, pady=(8, 4))
 
-        info_details = tk.Label(right, text="• GPS: Guided Route\n• Camera: Active\n• Sensors: Online",
-                               bg=PANEL, fg=MUTED, font=("Courier", 7), justify="left")
-        info_details.pack(anchor="w", padx=8, pady=(2, 6))
+        self.info_details = tk.Label(right, text="• GPS: Guided\n• Camera: Active\n• Sensors: Online",
+                               bg=PANEL, fg=TEXT, font=("JetBrains Mono", 8), justify="left")
+        self.info_details.pack(anchor="w", padx=20, pady=(0, 8))
 
-    def _build_bottom(self):
-        tk.Frame(self, bg=BORDER, height=1).pack(fill="x")
-        bottom = tk.Frame(self, bg=BG, height=200)  # INCREASED height for larger vehicle status
-        bottom.pack(fill="x")
-        bottom.pack_propagate(False)
+        # Status line
+        status_frame = tk.Frame(right, bg=BG)
+        status_frame.pack(fill="x", padx=12, pady=(0, 8))
+        self.status_label = tk.Label(status_frame, text="All systems operational", bg=BG, fg=GREEN, font=("JetBrains Mono", 8))
+        self.status_label.pack(anchor="w")
 
-        # ENLARGED vehicle status section
-        veh = tk.Frame(bottom, bg=PANEL)
-        veh.pack(side="left", fill="both", expand=True, padx=(4, 2), pady=4)
+        # Recent Summary card with tabs
+        summary_frame = tk.Frame(right, bg=BG)
+        summary_frame.pack(fill="both", expand=True, padx=20, pady=(8, 4))
 
-        tk.Label(veh, text="Vehicle Status", bg=PANEL, fg="#f59e0b", font=("Courier", 9, "bold")).pack(anchor="w", padx=8, pady=(6, 0))
+        header_row = tk.Frame(summary_frame, bg=BG)
+        header_row.pack(fill="x", padx=6, pady=(6, 4))
+        tk.Label(header_row, text="Recent Summary", bg=BG, fg=TEXT, font=("JetBrains Mono", 10, "bold")).pack(side="left")
 
-        # Create vehicle status metrics with larger fonts
-        self.card_speed = MetricCard(veh, "Speed", "-- km/h", unit="", status="N/A", status_color=MUTED, show_bar=False)
-        self.card_battery = MetricCard(veh, "Battery", "--%", unit="", status="Normal", status_color=GREEN, bar_color=GREEN, bar_pct=0)
-        self.card_energy = MetricCard(veh, "Energy", "--%", unit="", status="Normal", status_color=GREEN, bar_color=GREEN, bar_pct=0)
-        self.card_fuel = MetricCard(veh, "Fuel", "--%", unit="", status="Normal", status_color=GREEN, bar_color=GREEN, bar_pct=0)
+        # Tab container
+        tab_container = tk.Frame(summary_frame, bg=BG)
+        tab_container.pack(fill="x", padx=6, pady=(0, 6))
 
-        # Tire pressure - enhanced display with 4 tires
-        tire_frame = tk.Frame(veh, bg=PANEL)
-        tire_frame.pack(fill="x", padx=6, pady=(4, 0))
-        tk.Label(tire_frame, text="Tire Pressure (PSI)", bg=PANEL, fg=MUTED, font=("Courier", 8)).pack(anchor="w")
+        self.summary_tabs = {}
+        for i, (mins, label) in enumerate([(5, "5 Min"), (10, "10 Min"), (15, "15 Min")]):
+            tab_btn = tk.Label(tab_container, text=label, bg=CARD, fg=MUTED,
+                              font=("JetBrains Mono", 8), padx=12, pady=4, cursor="hand2")
+            tab_btn.pack(side="left", padx=(0, 4) if i < 2 else 0)
+            tab_btn.bind("<Button-1>", lambda e, m=mins: self._set_summary_window(m))
+            self.summary_tabs[mins] = tab_btn
 
-        self.tire_labels = []
-        tire_positions = ["FL", "FR", "RL", "RR"]  # Front Left, Front Right, Rear Left, Rear Right
+        self._summary_window = 5
+        self._refresh_summary_window_pills()
+
+        # Summary values container
+        self.summary_values_frame = tk.Frame(summary_frame, bg=CARD)
+        self.summary_values_frame.pack(fill="x", padx=6, pady=(0, 6))
+
+        # Eye Closures row
+        eye_row = tk.Frame(self.summary_values_frame, bg=CARD)
+        eye_row.pack(fill="x", pady=3)
+        tk.Label(eye_row, text="Eye Closures", bg=CARD, fg=MUTED, font=("JetBrains Mono", 8)).pack(side="left")
+        self.eye_closures_label = tk.Label(eye_row, text="0 events", bg=CARD, fg=TEXT, font=("JetBrains Mono", 8))
+        self.eye_closures_label.pack(side="left", padx=(8, 0))
+
+        # Yawns row
+        yawns_row = tk.Frame(self.summary_values_frame, bg=CARD)
+        yawns_row.pack(fill="x", pady=3)
+        tk.Label(yawns_row, text="Yawns", bg=CARD, fg=MUTED, font=("JetBrains Mono", 8)).pack(side="left")
+        self.yawns_value_label = tk.Label(yawns_row, text="0 events", bg=CARD, fg=TEXT, font=("JetBrains Mono", 8))
+        self.yawns_value_label.pack(side="left", padx=(8, 0))
+
+        # Fatigue Alerts row
+        fatigue_row = tk.Frame(self.summary_values_frame, bg=CARD)
+        fatigue_row.pack(fill="x", pady=3)
+        tk.Label(fatigue_row, text="Fatigue Alerts", bg=CARD, fg=MUTED, font=("JetBrains Mono", 8)).pack(side="left")
+        self.fatigue_value_label = tk.Label(fatigue_row, text="0 events", bg=CARD, fg=TEXT, font=("JetBrains Mono", 8))
+        self.fatigue_value_label.pack(side="left", padx=(8, 0))
+
+        # Avg Attention row
+        att_row = tk.Frame(self.summary_values_frame, bg=CARD)
+        att_row.pack(fill="x", pady=3)
+        tk.Label(att_row, text="Avg Attention", bg=CARD, fg=MUTED, font=("JetBrains Mono", 8)).pack(side="left")
+        self.avg_attention_label = tk.Label(att_row, text="100%", bg=CARD, fg=TEXT, font=("JetBrains Mono", 8))
+        self.avg_attention_label.pack(side="left", padx=(8, 0))
+
+        # PERCLOS Avg row
+        perclos_row = tk.Frame(self.summary_values_frame, bg=CARD)
+        perclos_row.pack(fill="x", pady=3)
+        tk.Label(perclos_row, text="PERCLOS Avg", bg=CARD, fg=MUTED, font=("JetBrains Mono", 8)).pack(side="left")
+        self.perclos_avg_label = tk.Label(perclos_row, text="0%", bg=CARD, fg=TEXT, font=("JetBrains Mono", 8))
+        self.perclos_avg_label.pack(side="left", padx=(8, 0))
+
+        # Vehicle Status card
+        vehicle_frame = tk.Frame(right, bg=BG)
+        vehicle_frame.pack(fill="x", padx=20, pady=(8, 4))
+
+        tk.Label(vehicle_frame, text="Vehicle Status", bg=BG, fg=YELLOW, font=("JetBrains Mono", 10, "bold")).pack(anchor="w", padx=6, pady=(6, 4))
+
+        # Tire Pressure
+        tire_frame = tk.Frame(vehicle_frame, bg=BG)
+        tire_frame.pack(fill="x", padx=6, pady=(0, 4))
+        tk.Label(tire_frame, text="Tire Pressure (PSI)", bg=BG, fg=MUTED, font=("JetBrains Mono", 8)).pack(anchor="w")
+
+        self.tire_labels = {}
+        tire_positions = ["FL", "FR", "RL", "RR"]
         for pos in tire_positions:
             tire_container = tk.Frame(tire_frame, bg=CARD, highlightbackground=BORDER, highlightthickness=1)
             tire_container.pack(fill="x", pady=2)
 
-            # Enhanced tire display with larger text
             tire_inner = tk.Frame(tire_container, bg=CARD)
-            tire_inner.pack(fill="x", padx=4, pady=2)
+            tire_inner.pack(fill="x", padx=8, pady=4)
 
-            pos_label = tk.Label(tire_inner, text=f"{pos}:", bg=CARD, fg=TEXT, font=("Courier", 8, "bold"))
+            pos_label = tk.Label(tire_inner, text=f"{pos}:", bg=CARD, fg=TEXT, font=("JetBrains Mono", 8))
             pos_label.pack(side="left")
 
-            pressure_label = tk.Label(tire_inner, text="-- psi", bg=CARD, fg=TEXT, font=("Courier", 8))
-            pressure_label.pack(side="left", padx=(4, 0))
+            pressure_label = tk.Label(tire_inner, text="-- psi", bg=CARD, fg=TEXT, font=("JetBrains Mono", 8))
+            pressure_label.pack(side="left", padx=(8, 0))
 
-            # Store reference to pressure label for updates
-            tire_container.pressure_label = pressure_label
-            self.tire_labels.append((pos, tire_container))
+            self.tire_labels[pos] = pressure_label
 
-        # Configure grid weights for better layout
-        veh.grid_columnconfigure(0, weight=1)
+        # Fuel level with progress bar
+        fuel_frame = tk.Frame(vehicle_frame, bg=BG)
+        fuel_frame.pack(fill="x", padx=6, pady=(4, 4))
+        tk.Label(fuel_frame, text="Fuel Level", bg=BG, fg=MUTED, font=("JetBrains Mono", 8)).pack(anchor="w")
 
-        tk.Frame(bottom, bg=BORDER, width=1).pack(side="left", fill="y")
+        self.fuel_frame = tk.Frame(fuel_frame, bg=BORDER, height=8)
+        self.fuel_frame.pack(fill="x", pady=(4, 4))
+        self.fuel_frame.pack_propagate(False)
+        self.fuel_bar = tk.Frame(self.fuel_frame, bg=GREEN, height=8)
+        self.fuel_bar.place(relwidth=0, relheight=1)
 
-        # ENHANCED map section with guided path
-        map_frame = tk.Frame(bottom, bg=PANEL)
-        map_frame.pack(side="left", fill="both", expand=True, padx=(2, 4), pady=4)
-        top_row = tk.Frame(map_frame, bg=PANEL)
-        top_row.pack(fill="x", padx=4, pady=(4, 0))
-        tk.Label(top_row, text="Guided Navigation", bg=PANEL, fg="#f59e0b", font=("Courier", 7, "bold")).pack(side="left")
+        self.fuel_percent_label = tk.Label(fuel_frame, text="0%", bg=PANEL, fg=TEXT, font=("JetBrains Mono", 8))
+        self.fuel_percent_label.pack(anchor="w")
+
+        # Vehicle speed
+        speed_frame = tk.Frame(vehicle_frame, bg=BG)
+        speed_frame.pack(fill="x", padx=6, pady=(4, 6))
+        tk.Label(speed_frame, text="Vehicle Speed", bg=BG, fg=MUTED, font=("JetBrains Mono", 8)).pack(anchor="w")
+        self.speed_value_label = tk.Label(speed_frame, text="-- km/h", bg=BG, fg=TEXT, font=("JetBrains Mono", 14, "bold"))
+        self.speed_value_label.pack(anchor="w", pady=(2, 0))
+        # DEMO label
+        tk.Label(speed_frame, text="DEMO", bg=BG, fg=MUTED, font=("JetBrains Mono", 7)).pack(anchor="w")
+
+    def _build_bottom(self):
+        tk.Frame(self, bg=BORDER, height=1).pack(fill="x", padx=25)
+        bottom = tk.Frame(self, bg=BG)
+        bottom.pack(fill="x", padx=30, pady=(0, 10))
+
+        # Configure grid for two columns: Guided Navigation (left) and Map (right)
+        bottom.columnconfigure(0, weight=0, minsize=280)  # Fixed width for Guided Navigation
+        bottom.columnconfigure(1, weight=1)  # Map takes remaining space
+
+        # NEW: Guided Navigation turn-by-turn card (left side)
+        nav_frame = tk.Frame(bottom, bg=BG)
+        nav_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 5), pady=4)
+        nav_frame.pack_propagate(False)
+
+        tk.Label(nav_frame, text="Guided Navigation", bg=BG, fg=BLUE, font=("JetBrains Mono", 10, "bold")).pack(anchor="w", padx=10, pady=(8, 4))
+
+        # Current turn display
+        current_turn = tk.Frame(nav_frame, bg=CARD, highlightbackground=BORDER, highlightthickness=1)
+        current_turn.pack(fill="x", padx=8, pady=(0, 4))
+
+        # Up-arrow icon + big distance + turn direction + street name
+        turn_inner = tk.Frame(current_turn, bg=CARD)
+        turn_inner.pack(fill="x", padx=10, pady=8)
+
+        tk.Label(turn_inner, text="▲", bg=CARD, fg=GREEN, font=("JetBrains Mono", 20)).pack(side="left", padx=(0, 8))
+
+        turn_details = tk.Frame(turn_inner, bg=CARD)
+        turn_details.pack(side="left", fill="y")
+
+        self.nav_distance_label = tk.Label(turn_details, text="2.4 km", bg=CARD, fg=TEXT, font=("JetBrains Mono", 16, "bold"))
+        self.nav_distance_label.pack(anchor="w")
+
+        self.nav_direction_label = tk.Label(turn_details, text="Turn right", bg=CARD, fg=TEXT, font=("JetBrains Mono", 11, "bold"))
+        self.nav_direction_label.pack(anchor="w")
+
+        self.nav_street_label = tk.Label(turn_details, text="University Rd", bg=CARD, fg=MUTED, font=("JetBrains Mono", 9))
+        self.nav_street_label.pack(anchor="w")
+
+        # Divider
+        tk.Frame(nav_frame, bg=BORDER, height=1).pack(fill="x", padx=8, pady=4)
+
+        # Next turn
+        next_turn = tk.Frame(nav_frame, bg=CARD, highlightbackground=BORDER, highlightthickness=1)
+        next_turn.pack(fill="x", padx=8, pady=(0, 4))
+
+        tk.Label(next_turn, text="Next Turn", bg=CARD, fg=MUTED, font=("JetBrains Mono", 7)).pack(anchor="w", padx=8, pady=(3, 0))
+
+        next_turn_inner = tk.Frame(next_turn, bg=CARD)
+        next_turn_inner.pack(fill="x", padx=8, pady=4)
+
+        tk.Label(next_turn_inner, text="▲", bg=CARD, fg=GREEN, font=("JetBrains Mono", 12)).pack(side="left", padx=(0, 4))
+
+        self.next_nav_distance_label = tk.Label(next_turn_inner, text="850 m", bg=CARD, fg=TEXT, font=("JetBrains Mono", 9))
+        self.next_nav_distance_label.pack(side="left", padx=(0, 4))
+
+        self.next_nav_direction_label = tk.Label(next_turn_inner, text="Turn left", bg=CARD, fg=TEXT, font=("JetBrains Mono", 9))
+        self.next_nav_direction_label.pack(side="left", padx=(0, 4))
+
+        self.next_nav_street_label = tk.Label(next_turn_inner, text="Main St", bg=CARD, fg=MUTED, font=("JetBrains Mono", 8))
+        self.next_nav_street_label.pack(side="left", padx=(0, 4))
+
+        # Divider
+        tk.Frame(nav_frame, bg=BORDER, height=1).pack(fill="x", padx=8, pady=4)
+
+        # ETA and Distance
+        eta_frame = tk.Frame(nav_frame, bg=PANEL)
+        eta_frame.pack(fill="x", padx=8, pady=(0, 4))
+
+        tk.Label(eta_frame, text="ETA", bg=PANEL, fg=MUTED, font=("JetBrains Mono", 8)).pack(side="left")
+        self.eta_label = tk.Label(eta_frame, text="09:32 PM", bg=PANEL, fg=TEXT, font=("JetBrains Mono", 8))
+        self.eta_label.pack(side="left", padx=(10, 0))
+
+        tk.Label(eta_frame, text="Distance", bg=PANEL, fg=MUTED, font=("JetBrains Mono", 8)).pack(side="left", padx=(20, 0))
+        self.distance_label = tk.Label(eta_frame, text="2.4 km", bg=PANEL, fg=TEXT, font=("JetBrains Mono", 8))
+        self.distance_label.pack(side="left", padx=(10, 0))
+
+        # Red End Route button
+        self.end_route_btn = tk.Label(nav_frame, text="End Route", bg=RED, fg="white",
+                                      font=("JetBrains Mono", 9, "bold"), padx=10, pady=6, cursor="hand2")
+        self.end_route_btn.pack(fill="x", padx=8, pady=(4, 8))
+        self.end_route_btn.bind("<Button-1>", lambda e: print("[Guided Navigation] Route ended"))
+
+        # Map (right side)
+        map_frame = tk.Frame(bottom, bg=BG)
+        map_frame.grid(row=0, column=1, sticky="nsew", padx=(5, 0), pady=4)
+
+        map_header = tk.Frame(map_frame, bg=BG)
+        map_header.pack(fill="x", padx=8, pady=(8, 0))
+        tk.Label(map_header, text="Live Map", bg=BG, fg=BLUE, font=("JetBrains Mono", 8, "bold")).pack(side="left")
+
         self.time_driven_var = tk.StringVar(value="00:00:00")
-        tk.Label(top_row, textvariable=self.time_driven_var, bg=PANEL, fg=TEXT, font=("Courier", 8, "bold")).pack(side="right")
-        tk.Label(top_row, text="Time driven: ", bg=PANEL, fg=MUTED, font=("Courier", 7)).pack(side="right")
+        tk.Label(map_header, textvariable=self.time_driven_var, bg=BG, fg=TEXT, font=("JetBrains Mono", 10, "bold")).pack(side="right")
+        tk.Label(map_header, text="Time driven: ", bg=BG, fg=MUTED, font=("JetBrains Mono", 8)).pack(side="right")
 
         # Pass our specific map and path
         self.map_canvas = MapCanvas(map_frame,
-                                   map_image_path="assets/map.png",
-                                   vehicle_path=self.campari_to_parliament_path)
-        self.map_canvas.pack(fill="both", expand=True, padx=4, pady=(0, 4))
+                                    map_image_path="assets/map.png",
+                                    vehicle_path=self.campari_to_parliament_path)
+        self.map_canvas.pack(fill="both", expand=True, padx=8, pady=(0, 8))
 
-    # ---------------- footer ----------------
     def _build_footer(self):
-        tk.Frame(self, bg=BORDER, height=1).pack(fill="x")
-        ftr = tk.Frame(self, bg=BG, height=28)
-        ftr.pack(fill="x")
+        tk.Frame(self, bg=BORDER, height=1).pack(fill="x", padx=25)
+        ftr = tk.Frame(self, bg=BG, height=30)
+        ftr.pack(fill="x", padx=30, pady=(0, 20))
         ftr.pack_propagate(False)
 
         left = tk.Frame(ftr, bg=BG)
-        left.pack(side="left", padx=10, pady=4)
+        left.pack(side="left", pady=4)
         for label in ["Settings", "Device Config", "History & Logs"]:
-            btn = tk.Label(left, text=label, bg=BG, fg=MUTED, font=("Courier", 8), cursor="hand2")
-            btn.pack(side="left", padx=6)
+            btn = tk.Label(left, text=label, bg=BG, fg=MUTED, font=("JetBrains Mono", 9), cursor="hand2")
+            btn.pack(side="left", padx=12)
             btn.bind("<Enter>", lambda e, b=btn: b.configure(fg=TEXT))
             btn.bind("<Leave>", lambda e, b=btn: b.configure(fg=MUTED))
 
         right = tk.Frame(ftr, bg=BG)
-        right.pack(side="right", padx=10, pady=4)
+        right.pack(side="right", pady=4)
 
         self._footer_dots = {}
-        for key, label in [("system", "System OK"), ("gps", "GPS: Guided Active"), ("sensors", "Sensors Online")]:
+        for key, label in [("system", "System OK"), ("gps", "GPS: Route Active"), ("sensors", "Sensors Online")]:
             f = tk.Frame(right, bg=BG)
-            f.pack(side="left", padx=8)
-            dot = tk.Label(f, text="●", bg=BG, fg=GREEN, font=("Courier", 7))
+            f.pack(side="left", padx=14)
+            dot = tk.Label(f, text="●", bg=BG, fg=GREEN, font=("JetBrains Mono", 8))
             dot.pack(side="left")
-            lbl = tk.Label(f, text=f" {label}", bg=BG, fg=MUTED, font=("Courier", 8))
+            lbl = tk.Label(f, text=f" {label}", bg=BG, fg=MUTED, font=("JetBrains Mono", 9))
             lbl.pack(side="left")
             self._footer_dots[key] = (dot, lbl)
 
         # Set GPS indicator to active since we're using guided path
-        self._footer_dots["gps"][0].configure(fg="#10b981")  # Green when guided path active
-        self._footer_dots["gps"][1].configure(text=f" GPS: Route Active")
+        self._footer_dots["gps"][0].configure(fg=GREEN)
 
     def _tick_clock(self):
         self._clock_var.set(time.strftime("%I:%M %p"))
@@ -775,7 +937,7 @@ class DrowsiGuardApp(tk.Tk):
         """Runs the real detection pipeline on one BGR frame. Returns
         (result, obj_result, overall_severity, overall_status, display_frame).
         Split out from _update() so it can be tested without a live camera."""
-        from src.severity import combine
+        from src.core.severity import combine
 
         frame = cv2.flip(frame, 1)
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -797,11 +959,6 @@ class DrowsiGuardApp(tk.Tk):
                 cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 230, 40), 2)
                 cv2.putText(frame, f"{det['label']} {det['confidence']:.2f}", (x1, max(20, y1 - 8)),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 230, 40), 2)
-
-        if self.night_mode:
-            tint = frame.copy()
-            tint[:, :] = (20, 15, 60)
-            frame = cv2.addWeighted(frame, 0.7, tint, 0.3, 0)
 
         overall_severity = combine(result.get("severity"), obj_result.get("severity"))
         overall_status = result.get("status") if result.get("severity") == overall_severity else obj_result.get("status")
@@ -829,10 +986,15 @@ class DrowsiGuardApp(tk.Tk):
         self.card_perclos.update_values(f"{perclos_pct}%", pct_word(perclos_pct), pct_color(perclos_pct), perclos_pct)
 
         closed_time = result.get("closed_time", 0.0)
-        eye_status = "Above Normal" if closed_time > 0.2 else "Normal"
-        self.card_eye.update_values(f"{closed_time:.2f}s", eye_status, YELLOW if closed_time > 0.2 else GREEN)
+        eye_status = "DROWSY" if closed_time > 1.3 else ("Warning" if closed_time > 0.2 else "Normal")
+        eye_color = RED if closed_time > 1.3 else (YELLOW if closed_time > 0.2 else GREEN)
+        self.card_eye.update_values(f"{closed_time:.2f}s", eye_status, eye_color)
 
         self.card_yawns.update_values(str(result.get("yawn_counter", 0)))
+
+        # Update gaze direction
+        gaze = result.get("gaze_direction", "Center")
+        self.card_gaze.update_values(gaze, "Tracking", ACCENT_BLUE if gaze == "Center" else YELLOW)
 
         phone_active = obj_result and obj_result.get("status") == "PHONE USE DETECTED"
         drink_active = obj_result and obj_result.get("status") == "DRINKING DETECTED"
@@ -845,9 +1007,6 @@ class DrowsiGuardApp(tk.Tk):
                 frame_w.configure(bg=CARD)
                 lbl.configure(bg=CARD, fg=MUTED)
 
-        self._update_alerts(result, obj_result)
-
-        # Update vehicle status with enhanced realism
         self._update_vehicle_status_enhanced()
 
         # Update GPS/map data (guided path from Campari house to Parliament House)
@@ -872,105 +1031,49 @@ class DrowsiGuardApp(tk.Tk):
 
     def _update_vehicle_status_enhanced(self):
         """Enhanced vehicle status with more realistic variations"""
-        # Simulate realistic vehicle data with gradual changes
         if not hasattr(self, '_last_speed'):
             self._last_speed = 0
-            self._last_battery = 95
-            self._last_energy = 80
             self._last_fuel = 75
-            self._last_tire_pressures = [32, 32, 31, 31]  # [FL, FR, RL, RR]
+            self._last_tire_pressures = {"FL": 32, "FR": 32, "RL": 31, "RR": 31}
 
         # Speed: gradual acceleration/deceleration (0-80 km/h for city driving)
         target_speed = random.randint(20, 60)
-        speed_change = (target_speed - self._last_speed) * 0.1  # Smooth transition
+        speed_change = (target_speed - self._last_speed) * 0.1
         speed = self._last_speed + speed_change
-        speed = max(0, min(80, speed))  # Clamp to reasonable city speeds
-
-        speed_status = "Normal"
-        speed_color = GREEN
-        if speed > 60:
-            speed_status = "Fast"
-            speed_color = YELLOW
-        elif speed < 10 and self._last_speed > 5:  # Slowing down
-            speed_status = "Slowing"
-            speed_color = YELLOW
-
-        self.card_speed.update_values(f"{int(speed)} km/h", speed_status, speed_color, int(speed))
+        speed = max(0, min(80, speed))
+        self.speed_value_label.configure(text=f"{int(speed)} km/h")
         self._last_speed = speed
 
-        # Battery: slow drain with occasional charging (simulating regen)
-        battery_change = random.uniform(-0.1, 0.05)  # Slow drain, slight chance of charge
-        battery = self._last_battery + battery_change
-        battery = max(10, min(98, battery))  # Keep in reasonable range
-
-        battery_status = "Good"
-        battery_color = GREEN
-        if battery < 20:
-            battery_status = "Low"
-            battery_color = RED
-        elif battery < 40:
-            battery_status = "Fair"
-            battery_color = YELLOW
-
-        self.card_battery.update_values(f"{int(battery)}%", battery_status, battery_color, int(battery))
-        self._last_battery = battery
-
-        # Energy: efficiency varies with driving conditions
-        energy_base = 70 + (speed / 80) * 20  # More efficient at moderate speeds
-        energy_variation = random.uniform(-5, 5)
-        energy = energy_base + energy_variation
-        energy = max(30, min(95, energy))
-
-        energy_status = "Good"
-        energy_color = GREEN
-        if energy < 40:
-            energy_status = "Low"
-            energy_color = RED
-        elif energy < 60:
-            energy_status = "Fair"
-            energy_color = YELLOW
-
-        self.card_energy.update_values(f"{int(energy)}%", energy_status, energy_color, int(energy))
-        self._last_energy = energy
-
-        # Fuel: slow consumption
-        fuel_change = random.uniform(-0.05, 0.01)  # Very slow consumption
+        # Fuel: slow consumption, shown as a progress bar
+        fuel_change = random.uniform(-0.05, 0.01)
         fuel = self._last_fuel + fuel_change
         fuel = max(5, min(95, fuel))
 
-        fuel_status = "Good"
         fuel_color = GREEN
         if fuel < 10:
-            fuel_status = "Low"
             fuel_color = RED
         elif fuel < 25:
-            fuel_status = "Fair"
             fuel_color = YELLOW
 
-        self.card_fuel.update_values(f"{int(fuel)}%", fuel_status, fuel_color, int(fuel))
+        self.fuel_bar.configure(bg=fuel_color)
+        self.fuel_bar.place(relwidth=max(0.0, min(1.0, fuel / 100)), relheight=1)
+        self.fuel_percent_label.configure(text=f"{int(fuel)}%")
         self._last_fuel = fuel
 
         # Tire pressures: slight natural variation
-        for i, (pos, container) in enumerate(self.tire_labels):
-            # Small random walk for each tire
+        for pos, pressure_label in self.tire_labels.items():
             pressure_change = random.uniform(-0.2, 0.2)
-            pressure = self._last_tire_pressures[i] + pressure_change
-            pressure = max(28, min(36, pressure))  # Normal operating range
+            pressure = self._last_tire_pressures[pos] + pressure_change
+            pressure = max(28, min(36, pressure))
 
-            status = "Normal"
             color = GREEN
             if pressure < 29:
-                status = "Low"
                 color = RED
             elif pressure > 35:
-                status = "High"
                 color = YELLOW
 
-            # Update the label text
-            if hasattr(container, 'pressure_label'):
-                container.pressure_label.configure(text=f"{int(pressure)} psi", fg=color)
-
-            self._last_tire_pressures[i] = pressure
+            pressure_label.configure(text=f"{int(pressure)} psi", fg=color)
+            self._last_tire_pressures[pos] = pressure
 
     def _update_guided_navigation(self):
         """Update the guided navigation from Campari house to Parliament House"""
@@ -995,47 +1098,71 @@ class DrowsiGuardApp(tk.Tk):
                 self.map_canvas.update_vehicle_path(self.campari_to_parliament_path)
                 self.map_canvas._show_demo_route = False
 
-    def _update_alerts(self, result, obj_result):
-        for child in list(self.alerts_container.winfo_children()):
-            child.destroy()
-
-        ALERT_TEXT = {
-            "DROWSINESS DETECTED": ("CRITICAL ALERT", "Eyes closed for an extended period. Pull over and rest immediately.", RED_DIM, RED),
-            "DROWSINESS DETECTED (PERCLOS)": ("WARNING", "Repeated fatigue signs over the last minute. Consider a break soon.", "#2d1e00", YELLOW),
-            "HEAD POSE ALERT": ("WARNING", "Head tilted away from the road for a sustained period.", "#2d1e00", YELLOW),
-            "HEAD NOD DETECTED": ("WARNING", "A quick head-drop was detected - possible microsleep.", "#2d1e00", YELLOW),
-            "PHONE USE DETECTED": ("INFO (monitored only)", "Phone use detected - logged, does not sound the alarm.", "#132233", BLUE),
-            "DRINKING DETECTED": ("INFO (monitored only)", "Drinking detected - logged, does not sound the alarm.", "#132233", BLUE),
-        }
-
-        active = []
-        if result.get("status") in ALERT_TEXT:
-            active.append(result["status"])
-        if obj_result and obj_result.get("status") in ALERT_TEXT:
-            active.append(obj_result["status"])
-
-        if not active:
-            self.no_alert_label = tk.Label(self.alerts_container, text="No active alerts", bg=PANEL, fg=GREEN, font=("Courier", 10, "bold"))
-            self.no_alert_label.pack(anchor="w", padx=10, pady=10)
-            self.rec_panel.pack_forget()
-            return
-
-        for status in active[:2]:
-            title, msg, bg, fg = ALERT_TEXT[status]
-            box = tk.Frame(self.alerts_container, bg=bg, highlightbackground=fg, highlightthickness=1)
-            box.pack(fill="x", padx=6, pady=2)
-            tk.Label(box, text=title, bg=bg, fg=fg, font=("Courier", 8, "bold")).pack(anchor="w", padx=6, pady=(5, 2))
-            tk.Label(box, text=msg, bg=bg, fg=TEXT, font=("Courier", 7), justify="left", wraplength=190).pack(anchor="w", padx=6, pady=(0, 5))
-
-        self.rec_panel.pack(fill="x", padx=6, pady=(10, 2))
+    # Recommended Actions panel removed from main dashboard
 
     def _update(self):
-        success, frame = self.cap.read()
-        if success:
-            result, obj_result, overall_severity, overall_status, disp = self.process_one_frame(frame)
-            self.apply_frame_result(result, obj_result, overall_severity, overall_status, disp)
+        if self.cap is not None:
+            success, frame = self.cap.read()
+            if success:
+                result, obj_result, overall_severity, overall_status, disp = self.process_one_frame(frame)
+                self.apply_frame_result(result, obj_result, overall_severity, overall_status, disp)
+                # Update summary analytics
+                self._update_summary_analytics()
         self._update_job = self.after(33, self._update)
 
+    def _update_summary_analytics(self):
+        """Update the summary panel with real-time analytics for Yawns and Fatigue Alerts."""
+        if not hasattr(self, 'yawns_value_label') or not self.logger:
+            return
+
+        try:
+            # Get analytics from the enhanced logger for the current window
+            analytics = self.logger.get_realtime_analytics(self._summary_window)
+
+            # Extract event counts
+            event_counts = analytics.get('event_counts', {})
+            yawn_count = event_counts.get('YAWN', 0)
+            fatigue_count = event_counts.get('DROWSINESS_START', 0)
+            eye_closure_count = event_counts.get('EYE_CLOSED', 0) + event_counts.get('DROWSINESS_START', 0)
+
+            # Update the labels
+            self.yawns_value_label.configure(text=f"{yawn_count} events")
+            self.fatigue_value_label.configure(text=f"{fatigue_count} events")
+            self.eye_closures_label.configure(text=f"{eye_closure_count} events")
+
+            # Calculate average attention and PERCLOS from recent data
+            avg_attention = analytics.get('avg_attention', 100)
+            avg_perclos = analytics.get('avg_perclos', 0)
+            self.avg_attention_label.configure(text=f"{avg_attention}%")
+            self.perclos_avg_label.configure(text=f"{round(avg_perclos * 100)}%")
+
+            # Optional: color code based on activity level
+            total_events = yawn_count + fatigue_count
+            if total_events > 5:  # High activity
+                color = RED
+            elif total_events > 2:  # Medium activity
+                color = YELLOW
+            else:  # Low activity
+                color = GREEN
+            self.yawns_value_label.configure(fg=color)
+            self.fatigue_value_label.configure(fg=color)
+            self.eye_closures_label.configure(fg=color)
+
+        except Exception as e:
+            print(f"[Dashboard] Error updating summary analytics: {e}")
+
+    def _set_summary_window(self, minutes):
+        """Set the summary window size and refresh the display."""
+        self._summary_window = minutes
+        self._refresh_summary_window_pills()
+        self._update_summary_analytics()
+
+    def _refresh_summary_window_pills(self):
+        """Update the appearance of the summary window tab buttons."""
+        for mins, tab_btn in self.summary_tabs.items():
+            active = mins == self._summary_window
+            tab_btn.configure(bg=BLUE if active else CARD,
+                             fg="white" if active else MUTED)
     def _on_close(self):
         # Cancel pending after() jobs BEFORE destroying - once a widget is
         # destroyed, even checking whether a pending job is safe to skip
@@ -1046,6 +1173,10 @@ class DrowsiGuardApp(tk.Tk):
                     self.after_cancel(job)
                 except tk.TclError:
                     pass
+
+        if self.vehicle_panel is not None:
+            self.vehicle_panel.is_running = False
+            self.vehicle_panel.destroy()
 
         if self.cap is not None:
             self.cap.release()

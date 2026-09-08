@@ -55,11 +55,14 @@ data/logs/events_*.csv
 data/logs/summary_*.txt
 data/audio/
 generated_audio/
+src/logs/
 
 # Model files (too large, download on first run)
 models/*.pt
 models/*.task
 !models/.gitkeep
+# YOLO weights vendored under src/ are also re-downloadable
+*.pt
 
 # Backup and temp files
 *.bak

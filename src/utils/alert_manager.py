@@ -9,7 +9,7 @@ import platform
 import subprocess
 import threading
 import time
-from src.audio_synth import generate_tone_wav
+from src.utils.audio_synth import generate_tone_wav
 
 SEVERITY_CONFIG = {
     "WARNING": {"pattern": [(700, 180), (0, 600)], "volume": 0.45},

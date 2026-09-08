@@ -1,0 +1,96 @@
+{
+  "detection": {
+    "ear_threshold": 0.23,
+    "mar_threshold": 0.40,
+    "eye_closed_duration": 1.3,
+    "yawn_duration": 1.0,
+    "head_pose_duration": 1.3,
+    "head_pitch_threshold": 15.0,
+    "head_pose_alert_deviation": 15.0,
+    "head_pose_alert_duration": 2.5,
+    "perclos_window": 60.0,
+    "perclos_threshold": 0.15,
+    "perclos_min_samples": 30
+  },
+  "hardware": {
+    "enabled": true,
+    "serial_port": "/dev/ttyACM0",
+    "baud_rate": 9600,
+    "timeout": 1.0,
+    "heartbeat_interval": 0.5,
+    "max_reconnect_attempts": 5,
+    "reconnect_delay": 2.0,
+    "command_delay": 0.05,
+    "min_safe_distance": 25,
+    "motor_speed": 170,
+    "emergency_stop_threshold": 8.0,
+    "face_loss_stop_threshold": 2.0,
+    "brake_duration": 1.5
+  },
+  "alerts": {
+    "enable_audio": true,
+    "alert_volume": 0.8,
+    "pre_alert_threshold": 0.8,
+    "adaptive_alerting": true,
+    "voice_alerts_enabled": false,
+    "emergency_call_enabled": false
+  },
+  "ui": {
+    "theme": "dark",
+    "show_fps": true,
+    "show_landmarks": true,
+    "night_mode_auto": true,
+    "update_interval_ms": 33,
+    "video_width": 640,
+    "video_height": 360,
+    "alert_panel_width": 200,
+    "summary_panel_height": 80,
+    "one_touch_action_size": 60
+  },
+  "performance": {
+    "adaptive_resolution": true,
+    "min_resolution_width": 320,
+    "min_resolution_height": 240,
+    "max_fps": 30,
+    "frame_skip_threshold": 0.8,
+    "use_umat": true,
+    "detect_every_n_frames": 1
+  },
+  "logging": {
+    "enable_detailed_logging": true,
+    "log_level": "INFO",
+    "max_log_file_size_mb": 10,
+    "keep_log_files": 5,
+    "session_summary_on_exit": true,
+    "realtime_analytics_window": 600
+  },
+  "driver_profile": {
+    "auto_calibrate_on_start": true,
+    "calibration_duration": 10.0,
+    "save_driver_profiles": true,
+    "profile_storage_dir": "data/driver_profiles",
+    "adaptive_thresholds": false
+  },
+  "extended_detection": {
+    "blink_rate_analysis": true,
+    "micro_sleep_detection": true,
+    "heart_rate_estimation": false,
+    "gaze_tracking": true,
+    "eye_openness_asymmetry": true,
+    "blink_rate_threshold": 25,
+    "micro_sleep_threshold": 0.5,
+    "gaze_deviation_threshold": 20
+  },
+  "monitoring": {
+    "enable_telemetry": false,
+    "telemetry_interval": 300,
+    "alert_forwarding": true,
+    "emergency_services_number": "911",
+    "monitoring_station_id": "DRIVER_MONITOR_001"
+  },
+  "system": {
+    "version": "1.0.0",
+    "last_updated": "2026-08-19",
+    "debug_mode": false
+  }
+}
