@@ -83,6 +83,9 @@ Thumbs.db
 *.cache
 .pytest_cache/
 
+# Graphify local-only files
+cost.json
+
 # OS specific
 .DS_Store
 .DS_Store?
